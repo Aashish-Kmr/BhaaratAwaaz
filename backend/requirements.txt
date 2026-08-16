@@ -1,0 +1,60 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha - unified backend requirements
+#
+# Merges BAIF-main (documents), BhaaratAwaaz-main (audio) and
+# BAIF-Video-main (video) into one dependency set. Confirmed-unused deps
+# from the original projects are dropped: easyocr, loguru, ffmpeg-python,
+# langdetect (source language is now always explicit from the frontend,
+# so per-cell language auto-detection is no longer needed).
+#
+# `parler_tts` is installed from GitHub, which is a build-time requirement
+# only (git + network needed once, while building the venv/PyInstaller
+# bundle) -- once installed, it freezes into a packaged app like any other
+# dependency. Its own setup.py pulls in `descript-audiotools` from git too
+# (unpinned) -- do NOT also pin descript-audiotools here yourself: pip
+# treats a separately-pinned direct-URL requirement for the same package as
+# a distinct, conflicting specifier and refuses to resolve it, even when it
+# would land on the identical commit. Let parler_tts's own dependency bring
+# it in.
+# ----------------------------------------------------------------------
+
+# --- Web framework -----------------------------------------------------
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+
+# --- Document translation (BAIF-main) -----------------------------------
+python-docx>=1.2.0
+python-pptx>=1.0.2
+openpyxl>=3.1.5
+pandas>=2.3.1
+PyMuPDF>=1.26.3
+Pillow>=11.3.0
+
+# --- Shared ML: translation, ASR, TTS -----------------------------------
+torch==2.13.0
+torchaudio==2.11.0
+transformers==4.46.1
+tokenizers==0.20.3
+accelerate>=1.10.0
+sentencepiece==0.2.2
+huggingface-hub==0.24.7
+hf-xet==1.6.0
+safetensors>=0.6.0
+IndicTransToolkit==1.1.1
+
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+
+av==18.1.0
+soundfile==0.14.0
+librosa==0.11.0
+numpy==1.26.4
+scipy==1.17.1
+onnxruntime==1.28.0
+
+descript-audio-codec==1.0.0
+parler_tts @ git+https://github.com/huggingface/parler-tts.git@d108732cd57788ec86bc857d99a6cabd66663d68
+
+# --- Packaging -----------------------------------------------------------
+pyinstaller>=6.10.0

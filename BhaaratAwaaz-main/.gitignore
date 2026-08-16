@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Generated audio
+data/input/*
+data/output/*
+data/temp/*
+
+# Keep directory structure
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/temp/.gitkeep
+
+# Downloaded models
+models/audio/*
+!models/audio/.gitkeep
+
+# Hugging Face cache
+.cache/
+huggingface/
+
+# OS
+.DS_Store
+Thumbs.db

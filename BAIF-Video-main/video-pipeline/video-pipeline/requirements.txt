@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+ffmpeg-python
+faster-whisper
+pysrt
+loguru
+torch
+ctranslate2  

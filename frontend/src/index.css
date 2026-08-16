@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --color-ink-950: #0b1220;
+  --color-ink-900: #111a2b;
+  --color-ink-800: #17223a;
+  --color-ink-700: #22304d;
+  --color-ink-600: #33456b;
+  --color-ink-400: #7f8ea8;
+  --color-ink-200: #c8d2e3;
+  --color-leaf-500: #2f9e6b;
+  --color-leaf-600: #248056;
+  --color-leaf-300: #6ed3a4;
+  --color-amber-alert: #e0a33a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: var(--color-ink-200);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Devanagari renders taller than Latin; give it room. */
+.deva {
+  line-height: 1.85;
+  font-feature-settings: "kern" 1;
+}
+
+/* Thin scrollbars inside panels */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-600) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-ink-600);
+  border-radius: 999px;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
