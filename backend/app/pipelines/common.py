@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from app import config
 from app.core.translation import translator
 from app.jobs.models import Segment
 from app.jobs.store import JobStore
@@ -25,28 +26,39 @@ def translate_segments(
     progress_start: float,
     progress_span: float,
 ) -> list[Segment]:
-    """Translate ASR segments one at a time, reporting incremental progress."""
+    """
+    Translate ASR segments in batches (see Translator.translate_batch) rather
+    than one at a time -- far fewer model.generate() calls for a transcript
+    with many short segments. Progress is still reported after each batch so
+    the UI doesn't look frozen on long transcripts.
+    """
 
     total = max(1, len(raw_segments))
     segments: list[Segment] = []
+    batch_size = config.TRANSLATION_BATCH_SIZE
 
-    for index, raw in enumerate(raw_segments):
+    for chunk_start in range(0, len(raw_segments), batch_size):
         if should_stop():
             raise InterruptedError("cancelled")
 
-        target_text = translator.translate(raw["text"], source_lang, target_lang)
+        chunk = raw_segments[chunk_start : chunk_start + batch_size]
+        texts = [raw["text"] for raw in chunk]
 
-        segments.append(
-            Segment(
-                id=f"{job_id}_s{raw['id']}",
-                start=raw["start"],
-                end=raw["end"],
-                source=raw["text"],
-                target=target_text,
-                confidence=raw.get("confidence"),
+        translated_texts = translator.translate_batch(texts, source_lang, target_lang)
+
+        for raw, target_text in zip(chunk, translated_texts):
+            segments.append(
+                Segment(
+                    id=f"{job_id}_s{raw['id']}",
+                    start=raw["start"],
+                    end=raw["end"],
+                    source=raw["text"],
+                    target=target_text,
+                    confidence=raw.get("confidence"),
+                )
             )
-        )
 
-        store.update(job_id, progress=progress_start + (index + 1) / total * progress_span)
+        done = chunk_start + len(chunk)
+        store.update(job_id, progress=progress_start + done / total * progress_span)
 
     return segments

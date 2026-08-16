@@ -103,6 +103,12 @@ ASR_COMPUTE_TYPE = os.getenv("BAIF_ASR_COMPUTE_TYPE", "int8")
 ASR_BEAM_SIZE = int(os.getenv("BAIF_ASR_BEAM_SIZE", "5"))
 
 TRANSLATION_DEVICE = os.getenv("BAIF_TRANSLATION_DEVICE", "cpu")
+# How many segments/paragraphs go into one model.generate() call. Higher is
+# faster (fewer calls, better CPU utilization) but uses more memory per call.
+TRANSLATION_BATCH_SIZE = int(os.getenv("BAIF_TRANSLATION_BATCH_SIZE", "8"))
+# Beam search width for translation. Lower is faster with a small quality
+# tradeoff -- try 1 (greedy) or 3 if translation is the bottleneck.
+TRANSLATION_NUM_BEAMS = int(os.getenv("BAIF_TRANSLATION_NUM_BEAMS", "5"))
 TTS_DEVICE = os.getenv("BAIF_TTS_DEVICE") or None
 
 VAD_ENABLED = True

@@ -112,8 +112,26 @@ class Translator:
         return tokenizer, model, processor
 
     def translate(self, text: str, source_language: str, target_language: str) -> str:
-        if not text or not text.strip():
-            return text
+        return self.translate_batch([text], source_language, target_language)[0]
+
+    def translate_batch(
+        self,
+        texts: list[str],
+        source_language: str,
+        target_language: str,
+        num_beams: int = config.TRANSLATION_NUM_BEAMS,
+    ) -> list[str]:
+        """
+        Translate many texts in one (or few) model.generate() calls instead
+        of one call per text. Tokenize/generate/decode overhead is paid once
+        per batch rather than once per segment, which matters a lot for
+        transcripts with many short segments (typical for speech) -- this is
+        the main lever for making audio/video translation faster, since both
+        pipelines already funnel through this same method.
+        """
+
+        if not texts:
+            return []
 
         if source_language not in config.FLORES_CODES:
             raise TranslationError(f"Unsupported source language: {source_language}")
@@ -121,50 +139,60 @@ class Translator:
             raise TranslationError(f"Unsupported target language: {target_language}")
 
         if source_language == target_language:
-            return text
+            return list(texts)
+
+        # Empty/whitespace-only entries are passed through unchanged rather
+        # than fed to the model, but keep their position in the output list.
+        indices_to_translate = [i for i, t in enumerate(texts) if t and t.strip()]
+        results = list(texts)
+
+        if not indices_to_translate:
+            return results
 
         model_type = self._get_model_type(source_language, target_language)
-
         src_lang = config.FLORES_CODES[source_language]
         tgt_lang = config.FLORES_CODES[target_language]
 
         with self._lock:
             tokenizer, model, processor = self._load_model(model_type)
 
-            batch = processor.preprocess_batch([text], src_lang=src_lang, tgt_lang=tgt_lang)
+            texts_to_translate = [texts[i] for i in indices_to_translate]
 
-            inputs = tokenizer(
-                batch,
-                truncation=True,
-                padding="longest",
-                return_tensors="pt",
-                return_attention_mask=True,
-            ).to(self.device)
+            for chunk_start in range(0, len(texts_to_translate), config.TRANSLATION_BATCH_SIZE):
+                chunk = texts_to_translate[chunk_start : chunk_start + config.TRANSLATION_BATCH_SIZE]
 
-            with torch.no_grad():
-                generated_tokens = model.generate(
-                    **inputs,
-                    use_cache=True,
-                    min_length=0,
-                    max_length=256,
-                    num_beams=5,
-                    num_return_sequences=1,
+                batch = processor.preprocess_batch(chunk, src_lang=src_lang, tgt_lang=tgt_lang)
+
+                inputs = tokenizer(
+                    batch,
+                    truncation=True,
+                    padding="longest",
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                ).to(self.device)
+
+                with torch.no_grad():
+                    generated_tokens = model.generate(
+                        **inputs,
+                        use_cache=True,
+                        min_length=0,
+                        max_length=256,
+                        num_beams=num_beams,
+                        num_return_sequences=1,
+                    )
+
+                generated_text = tokenizer.batch_decode(
+                    generated_tokens,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True,
                 )
 
-            generated_text = tokenizer.batch_decode(
-                generated_tokens,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=True,
-            )
+                translated_chunk = processor.postprocess_batch(generated_text, lang=tgt_lang)
 
-            translations = processor.postprocess_batch(generated_text, lang=tgt_lang)
+                for offset, translated in enumerate(translated_chunk):
+                    results[indices_to_translate[chunk_start + offset]] = translated
 
-        return translations[0]
-
-    def translate_batch(
-        self, texts: list[str], source_language: str, target_language: str
-    ) -> list[str]:
-        return [self.translate(t, source_language, target_language) for t in texts]
+        return results
 
 
 translator = Translator()
