@@ -45,6 +45,7 @@ class ASR:
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type,
+                cpu_threads=config.ASR_CPU_THREADS,
             )
         return self._model
 

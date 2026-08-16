@@ -9,6 +9,9 @@ from IndicTransToolkit.processor import IndicProcessor
 
 from app import config
 
+if config.TORCH_NUM_THREADS is not None:
+    torch.set_num_threads(config.TORCH_NUM_THREADS)
+
 
 class TranslationError(Exception):
     """Base exception for translation-related errors."""

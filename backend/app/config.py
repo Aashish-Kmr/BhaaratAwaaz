@@ -101,6 +101,11 @@ ASR_MODEL = os.getenv("BAIF_ASR_MODEL", "medium")
 ASR_DEVICE = os.getenv("BAIF_ASR_DEVICE", "cpu")
 ASR_COMPUTE_TYPE = os.getenv("BAIF_ASR_COMPUTE_TYPE", "int8")
 ASR_BEAM_SIZE = int(os.getenv("BAIF_ASR_BEAM_SIZE", "5"))
+# 0 = let ctranslate2 pick (its own default was as good as or better than
+# forcing all cores when benchmarked on Apple Silicon -- more threads isn't
+# automatically faster, especially on P+E core CPUs). Worth experimenting
+# with on whatever machine actually runs the demo.
+ASR_CPU_THREADS = int(os.getenv("BAIF_ASR_CPU_THREADS", "0"))
 
 TRANSLATION_DEVICE = os.getenv("BAIF_TRANSLATION_DEVICE", "cpu")
 # How many segments/paragraphs go into one model.generate() call. Higher is
@@ -109,6 +114,10 @@ TRANSLATION_BATCH_SIZE = int(os.getenv("BAIF_TRANSLATION_BATCH_SIZE", "8"))
 # Beam search width for translation. Lower is faster with a small quality
 # tradeoff -- try 1 (greedy) or 3 if translation is the bottleneck.
 TRANSLATION_NUM_BEAMS = int(os.getenv("BAIF_TRANSLATION_NUM_BEAMS", "5"))
+# unset = leave torch's own default thread count alone (same reasoning as
+# ASR_CPU_THREADS above -- benchmarked no better, sometimes worse, on this
+# machine when forced to all cores).
+TORCH_NUM_THREADS = int(os.environ["BAIF_TORCH_THREADS"]) if os.getenv("BAIF_TORCH_THREADS") else None
 TTS_DEVICE = os.getenv("BAIF_TTS_DEVICE") or None
 
 VAD_ENABLED = True

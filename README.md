@@ -79,10 +79,21 @@ below:
 | `BAIF_ASR_BEAM_SIZE` | `5` | faster transcription per segment |
 | `BAIF_TRANSLATION_NUM_BEAMS` | `5` | faster translation generation per batch |
 | `BAIF_TRANSLATION_BATCH_SIZE` | `8` | segments translated per model call — raising it (not lowering) trades memory for fewer, more efficient calls |
+| `BAIF_ASR_CPU_THREADS` | `0` (library auto) | CPU threads faster-whisper uses per transcription |
+| `BAIF_TORCH_THREADS` | unset (library auto) | CPU threads PyTorch uses for translation |
 
 Translation segments are already batched (multiple segments per
 `model.generate()` call, not one call each) — this alone is roughly a 3-4x
 speedup over translating one segment at a time on a typical transcript.
+
+**On multi-core CPUs, more threads is not automatically faster.** Benchmarked
+on a 10-core Apple Silicon Mac, forcing `BAIF_ASR_CPU_THREADS=10` or
+`BAIF_TORCH_THREADS=10` was the same or slightly *slower* than leaving both
+on their library defaults (which land around 4 threads on their own) —
+Apple's performance/efficiency core split means naively maxing thread count
+can hurt. Whether this holds on a different machine (e.g. a uniform-core
+Windows/Linux laptop) isn't something to assume either way — benchmark on
+the actual demo machine before changing these from their defaults.
 
 ## Known limitations
 
