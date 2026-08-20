@@ -1,37 +1,66 @@
 from pathlib import Path
+
 import pysrt
 
 
-def _seconds_to_time(seconds: float) -> pysrt.SubRipTime:
-    ms = int(seconds * 1000)
-    hours = ms // 3_600_000
-    ms %= 3_600_000
-    minutes = ms // 60_000
-    ms %= 60_000
-    secs = ms // 1000
-    ms %= 1000
-    return pysrt.SubRipTime(hours=hours, minutes=minutes, seconds=secs, milliseconds=ms)
+def seconds_to_time(
+    seconds: float,
+) -> pysrt.SubRipTime:
+
+    milliseconds = int(
+        round(seconds * 1000)
+    )
+
+    hours = milliseconds // 3_600_000
+    milliseconds %= 3_600_000
+
+    minutes = milliseconds // 60_000
+    milliseconds %= 60_000
+
+    secs = milliseconds // 1000
+    milliseconds %= 1000
+
+    return pysrt.SubRipTime(
+        hours=hours,
+        minutes=minutes,
+        seconds=secs,
+        milliseconds=milliseconds,
+    )
 
 
-def generate_srt(
+def create_srt(
     segments: list[dict],
-    output_dir: str | Path,
-    filename: str = "subtitles.srt",
-) -> str:
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    srt_path = output_dir / filename
+    output_path: Path,
+) -> Path:
 
-    subs = pysrt.SubRipFile()
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-    for i, seg in enumerate(segments, start=1):
-        item = pysrt.SubRipItem(
-            index=i,
-            start=_seconds_to_time(seg["start"]),
-            end=_seconds_to_time(seg["end"]),
-            text=seg["source_text"],
+    subtitles = pysrt.SubRipFile()
+
+    for index, segment in enumerate(
+        segments,
+        start=1,
+    ):
+
+        subtitles.append(
+            pysrt.SubRipItem(
+                index=index,
+                start=seconds_to_time(
+                    segment["start"]
+                ),
+                end=seconds_to_time(
+                    segment["end"]
+                ),
+                text=segment["text"],
+            )
         )
-        subs.append(item)
 
-    subs.save(str(srt_path), encoding="utf-8")
-    return str(srt_path)
+    subtitles.save(
+        str(output_path),
+        encoding="utf-8",
+    )
+
+    return output_path

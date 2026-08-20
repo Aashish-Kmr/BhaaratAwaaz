@@ -1,95 +1,263 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
 from pathlib import Path
 import shutil
 import uuid
 
-from app.services.extractor import extract_audio_from_video
-from app.services.transcriber import transcribe_audio
-from app.services.subtitles import generate_srt
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 
-router = APIRouter(prefix="/video", tags=["Video Pipeline"])
+from fastapi.responses import FileResponse
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "outputs"
-TEMP_DIR = BASE_DIR / "temp"
+from app.config import (
+    UPLOAD_DIR,
+    OUTPUT_DIR,
+)
 
-for d in [UPLOAD_DIR, OUTPUT_DIR, TEMP_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+from app.services.pipeline import (
+    process_video,
+)
+
+
+router = APIRouter(
+    prefix="/video",
+    tags=["Video Pipeline"],
+)
+
+
+SUPPORTED_EXTENSIONS = {
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".mov",
+    ".avi",
+    ".wmv",
+    ".flv",
+}
+
+
+SUPPORTED_LANGUAGES = {
+    "english",
+    "hindi",
+    "marathi",
+}
 
 
 @router.post("/process")
-async def process_video(
+async def process(
     file: UploadFile = File(...),
-    source_language: str = Form("mr"),
+    source_language: str = Form(...),
+    target_language: str = Form(...),
 ):
-    job_id = str(uuid.uuid4())
-    job_upload_dir = UPLOAD_DIR / job_id
-    job_output_dir = OUTPUT_DIR / job_id
-    job_temp_dir = TEMP_DIR / job_id
 
-    job_upload_dir.mkdir(parents=True, exist_ok=True)
-    job_output_dir.mkdir(parents=True, exist_ok=True)
-    job_temp_dir.mkdir(parents=True, exist_ok=True)
+    # -----------------------------
+    # Validate languages
+    # -----------------------------
+
+    if source_language not in (
+        SUPPORTED_LANGUAGES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported source language: "
+                f"{source_language}"
+            ),
+        )
+
+    if target_language not in (
+        SUPPORTED_LANGUAGES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported target language: "
+                f"{target_language}"
+            ),
+        )
+
+    # -----------------------------
+    # Validate extension
+    # -----------------------------
+
+    filename = Path(
+        file.filename or ""
+    ).name
+
+    extension = (
+        Path(filename)
+        .suffix
+        .lower()
+    )
+
+    if extension not in (
+        SUPPORTED_EXTENSIONS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported video format: "
+                f"{extension}"
+            ),
+        )
+
+    # -----------------------------
+    # Create job
+    # -----------------------------
+
+    job_id = str(
+        uuid.uuid4()
+    )
+
+    job_upload_dir = (
+        UPLOAD_DIR / job_id
+    )
+
+    job_upload_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    video_path = (
+        job_upload_dir / filename
+    )
+
+    # -----------------------------
+    # Save upload
+    # -----------------------------
 
     try:
-        input_video_path = job_upload_dir / file.filename
 
-        with open(input_video_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        with video_path.open(
+            "wb"
+        ) as buffer:
 
-        audio_path = extract_audio_from_video(
-            video_path=input_video_path,
-            output_dir=job_temp_dir,
+            shutil.copyfileobj(
+                file.file,
+                buffer,
+            )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to save "
+                f"uploaded video: {exc}"
+            ),
         )
 
-        transcript_segments = transcribe_audio(
-            audio_path=audio_path,
+    # -----------------------------
+    # Process
+    # -----------------------------
+
+    try:
+
+        result = process_video(
+            video_path=video_path,
+            job_id=job_id,
             source_language=source_language,
-        )
-
-        srt_path = generate_srt(
-            segments=transcript_segments,
-            output_dir=job_output_dir,
-            filename=f"{Path(file.filename).stem}.srt",
+            target_language=target_language,
         )
 
         return {
             "job_id": job_id,
             "status": "completed",
-            "original_video": str(input_video_path),
-            "extracted_audio": str(audio_path),
-            "subtitle_file": str(srt_path),
-            "segments": transcript_segments,
+            "source_language": source_language,
+            "target_language": target_language,
+            **result,
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
 
+        traceback.print_exc()
 
-@router.get("/{job_id}/subtitles")
-def download_subtitles(job_id: str):
-    job_output_dir = OUTPUT_DIR / job_id
-
-    if not job_output_dir.exists():
         raise HTTPException(
-            status_code=404,
-            detail="Job output directory not found"
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}",
         )
 
-    subtitle_files = list(job_output_dir.glob("*.srt"))
 
-    if not subtitle_files:
+@router.get(
+    "/{job_id}/source-srt"
+)
+def download_source_srt(
+    job_id: str,
+):
+
+    path = (
+        OUTPUT_DIR
+        / job_id
+        / "source.srt"
+    )
+
+    if not path.exists():
+
         raise HTTPException(
             status_code=404,
-            detail="Subtitle file not found for this job"
+            detail="Source SRT not found.",
         )
-
-    subtitle_file = subtitle_files[0]
 
     return FileResponse(
-        path=subtitle_file,
+        path=str(path),
         media_type="application/x-subrip",
-        filename=subtitle_file.name,
+        filename="source.srt",
+    )
+
+
+@router.get(
+    "/{job_id}/translated-srt"
+)
+def download_translated_srt(
+    job_id: str,
+):
+
+    path = (
+        OUTPUT_DIR
+        / job_id
+        / "translated.srt"
+    )
+
+    if not path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="Translated SRT not found.",
+        )
+
+    return FileResponse(
+        path=str(path),
+        media_type="application/x-subrip",
+        filename="translated.srt",
+    )
+
+
+@router.get(
+    "/{job_id}/translated-video"
+)
+def download_translated_video(
+    job_id: str,
+):
+
+    path = (
+        OUTPUT_DIR
+        / job_id
+        / "translated_video.mp4"
+    )
+
+    if not path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="Translated video not found.",
+        )
+
+    return FileResponse(
+        path=str(path),
+        media_type="video/mp4",
+        filename="translated_video.mp4",
     )

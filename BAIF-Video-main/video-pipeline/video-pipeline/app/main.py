@@ -1,14 +1,18 @@
 from fastapi import FastAPI
-from app.api.video import router as video_router
+
+from app.api.video import router
+
 
 app = FastAPI(
-    title="BAIF Video Pipeline",
-    version="0.1.0",
+    title="BAIF Offline Video Translation",
+    version="1.0.0",
 )
 
-app.include_router(video_router)
+app.include_router(router)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok"
+    }
