@@ -8,6 +8,7 @@ from fastapi import (
     HTTPException,
 )
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from config import OUTPUT_DIR, UPLOAD_DIR
 
@@ -27,7 +28,6 @@ router = APIRouter()
 
 @router.get("/health")
 def health():
-
     return {
         "status": "UP"
     }
@@ -42,269 +42,149 @@ async def translate_file(
     file: UploadFile = File(...),
     target_language: str = Form(...),
 ):
-
     # ------------------------------------------------------
     # Validate target language
     # ------------------------------------------------------
+    target_language = target_language.strip().lower()
 
-    target_language = (
-        target_language
-        .strip()
-        .lower()
-    )
-
-    if target_language not in (
-        "en",
-        "hi",
-        "mr",
-    ):
-
+    if target_language not in ("en", "hi", "mr"):
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Unsupported target language. "
-                "Supported languages: en, hi, mr."
-            ),
+            detail="Unsupported target language. Supported languages: en, hi, mr.",
         )
 
     # ------------------------------------------------------
     # Validate filename
     # ------------------------------------------------------
-
     if not file.filename:
-
         raise HTTPException(
             status_code=400,
             detail="Filename is required.",
         )
 
-    original_filename = Path(
-        file.filename
-    ).name
-
-    suffix = Path(
-        original_filename
-    ).suffix.lower()
+    original_filename = Path(file.filename).name
+    suffix = Path(original_filename).suffix.lower()
 
     # ------------------------------------------------------
-    # Supported file types
+    # Map extensions to specific handler methods
     # ------------------------------------------------------
-
-    supported_extensions = {
-        ".docx",
-        ".pptx",
-        ".xlsx",
-        ".csv",
-        ".pdf",
+    handler_actions = {
+        ".docx": docx_handler.translate_docx,
+        ".pptx": pptx_handler.translate_pptx,
+        ".xlsx": xlsx_handler.translate_xlsx,
+        ".csv": csv_handler.translate_csv,
+        ".pdf": pdf_handler.translate_pdf,
     }
 
-    if suffix not in supported_extensions:
+    action = handler_actions.get(suffix)
 
+    if action is None:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Unsupported file type. "
-                "Supported files: "
-                ".docx, .pptx, .xlsx, .csv, .pdf"
-            ),
+            detail="Unsupported file type. Supported files: .docx, .pptx, .xlsx, .csv, .pdf",
         )
 
     # ------------------------------------------------------
     # Input / output paths
     # ------------------------------------------------------
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    input_path = (
-        UPLOAD_DIR
-        / original_filename
-    )
-
-    output_path = (
-        OUTPUT_DIR
-        / f"translated_{original_filename}"
-    )
+    input_path = UPLOAD_DIR / original_filename
+    output_path = OUTPUT_DIR / f"translated_{original_filename}"
 
     # ------------------------------------------------------
     # Save uploaded file
     # ------------------------------------------------------
-
     try:
-
-        with open(
-            input_path,
-            "wb",
-        ) as output_file:
-
+        with open(input_path, "wb") as output_file:
             while True:
-
-                chunk = await file.read(
-                    1024 * 1024
-                )
-
+                chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
-
-                output_file.write(
-                    chunk
-                )
-
+                output_file.write(chunk)
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Failed to save uploaded file: "
-                f"{exc}"
-            ),
-        )
-
-    # ------------------------------------------------------
-    # Select appropriate handler
-    # ------------------------------------------------------
-
-    handlers = {
-        ".docx": docx_handler,
-        ".pptx": pptx_handler,
-        ".xlsx": xlsx_handler,
-        ".csv": csv_handler,
-        ".pdf": pdf_handler,
-    }
-
-    handler = handlers.get(
-        suffix
-    )
-
-    if handler is None:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported file type.",
+            detail=f"Failed to save uploaded file: {exc}",
         )
 
     # ------------------------------------------------------
     # Log translation request
     # ------------------------------------------------------
-
     print()
     print("=" * 60)
     print("TRANSLATION REQUEST")
     print("=" * 60)
-
-    print(
-        "File:",
-        original_filename,
-    )
-
-    print(
-        "File type:",
-        suffix,
-    )
-
-    print(
-        "Target language:",
-        target_language,
-    )
-
-    print(
-        "Source language:",
-        "AUTO DETECT",
-    )
-
+    print("File:", original_filename)
+    print("File type:", suffix)
+    print("Target language:", target_language)
+    print("Source language:", "AUTO DETECT")
     print("=" * 60)
 
     # ------------------------------------------------------
-    # Translate
-    #
-    # IMPORTANT:
-    #
-    # source_language is intentionally NOT passed.
-    #
-    # TranslationService will automatically call:
-    #
-    # detect_language(text)
+    # Execute translation via Threadpool
     # ------------------------------------------------------
-
     try:
-
-        handler.translate(
-            input_file=input_path,
-            output_file=output_path,
-            target_language=target_language,
-        )
-
+        if suffix == ".pdf":
+            # pdf_handler takes input_pdf_path, output_pdf_path
+            await run_in_threadpool(
+                action,
+                input_pdf_path=str(input_path),
+                output_pdf_path=str(output_path),
+                target_language=target_language,
+                source_language=None,
+            )
+        else:
+            # docx, pptx, xlsx, csv take input_path, output_path
+            await run_in_threadpool(
+                action,
+                input_path=str(input_path),
+                output_path=str(output_path),
+                target_language=target_language,
+                source_language=None,
+            )
     except Exception as exc:
-
-        print(
-            "Translation failed:",
-            repr(exc),
-        )
-
-        # --------------------------------------------------
-        # Remove incomplete output if one was created
-        # --------------------------------------------------
-
+        print("Translation failed:", repr(exc))
         if output_path.exists():
-
             try:
                 output_path.unlink()
             except Exception:
                 pass
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Translation failed: {exc}"
-            ),
+            detail=f"Translation failed: {exc}",
         )
 
     # ------------------------------------------------------
     # Verify output file
     # ------------------------------------------------------
-
     if not output_path.exists():
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Translation completed but "
-                "output file was not created."
-            ),
+            detail="Translation completed but output file was not created.",
         )
 
     # ------------------------------------------------------
     # Media types
     # ------------------------------------------------------
-
     media_types = {
-
-        ".docx":
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-
-        ".pptx":
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-
-        ".xlsx":
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-
-        ".csv":
-            "text/csv",
-
-        ".pdf":
-            "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".csv": "text/csv",
+        ".pdf": "application/pdf",
     }
 
     # ------------------------------------------------------
     # Return translated file
     # ------------------------------------------------------
-
     return FileResponse(
         path=str(output_path),
         media_type=media_types[suffix],
         filename=output_path.name,
         headers={
-            "Content-Disposition": (
-                f'attachment; '
-                f'filename="{output_path.name}"'
-            ),
+            "Content-Disposition": f'attachment; filename="{output_path.name}"',
             "Cache-Control": "no-cache",
         },
     )

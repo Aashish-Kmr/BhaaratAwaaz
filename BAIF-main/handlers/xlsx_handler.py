@@ -1,108 +1,43 @@
-from openpyxl import load_workbook
-
+import openpyxl
 from services.translation_service import translation_service
-from utils.language import detect_language
+
+BATCH_SIZE = 32
 
 
 class XlsxHandler:
+    def translate_xlsx(self, input_path, output_path, target_language="hi", source_language=None):
+        wb = openpyxl.load_workbook(input_path)
 
-    def translate(
-        self,
-        input_file,
-        output_file,
-        target_language,
-    ):
-        print("Opening XLSX:", input_file)
+        for sheet in wb.worksheets:
+            cells_to_translate = []
 
-        workbook = load_workbook(
-            input_file,
-            data_only=False,
-        )
-
-        for worksheet in workbook.worksheets:
-
-            print(
-                f"Processing worksheet: {worksheet.title}"
-            )
-
-            for row in worksheet.iter_rows():
-
+            for row in sheet.iter_rows():
                 for cell in row:
+                    if cell.value and isinstance(cell.value, str) and cell.value.strip():
+                        # Skip formulas
+                        if not cell.value.startswith("="):
+                            cells_to_translate.append(cell)
 
-                    value = cell.value
+            if not cells_to_translate:
+                continue
 
-                    # --------------------------------------------
-                    # Skip empty cells
-                    # --------------------------------------------
+            all_texts = [cell.value for cell in cells_to_translate]
+            translated_texts = []
 
-                    if value is None:
-                        continue
-
-                    # --------------------------------------------
-                    # Skip formulas
-                    # --------------------------------------------
-
-                    if isinstance(value, str) and value.startswith("="):
-                        continue
-
-                    # --------------------------------------------
-                    # Translate only string values
-                    # --------------------------------------------
-
-                    if not isinstance(value, str):
-                        continue
-
-                    text = value.strip()
-
-                    if not text:
-                        continue
-
-                    # --------------------------------------------
-                    # Detect source language
-                    # --------------------------------------------
-
-                    source_language = detect_language(text)
-
-                    print(
-                        f"Cell {cell.coordinate}: "
-                        f"{source_language} -> {target_language}"
-                    )
-
-                    # --------------------------------------------
-                    # Same language
-                    # --------------------------------------------
-
-                    if source_language == target_language:
-                        continue
-
-                    # --------------------------------------------
-                    # Translate
-                    # --------------------------------------------
-
-                    translated = translation_service.translate_text(
-                        text=text,
+            for i in range(0, len(all_texts), BATCH_SIZE):
+                chunk = all_texts[i:i + BATCH_SIZE]
+                translated_texts.extend(
+                    translation_service.translate_texts(
+                        texts=chunk,
                         target_language=target_language,
-                        source_language=source_language,
+                        source_language=source_language
                     )
+                )
 
-                    # --------------------------------------------
-                    # Replace ONLY cell value
-                    #
-                    # Existing formatting is preserved.
-                    # --------------------------------------------
+            for cell, trans_text in zip(cells_to_translate, translated_texts):
+                cell.value = trans_text
 
-                    cell.value = translated
-
-        # --------------------------------------------
-        # Save workbook
-        # --------------------------------------------
-
-        workbook.save(output_file)
-
-        print(
-            "Translated XLSX saved:",
-            output_file,
-        )
+        wb.save(output_path)
 
 
 xlsx_handler = XlsxHandler()

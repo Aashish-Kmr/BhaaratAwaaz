@@ -1,89 +1,51 @@
-import pandas as pd
-
+import csv
 from services.translation_service import translation_service
+
+BATCH_SIZE = 32
 
 
 class CsvHandler:
+    def translate_csv(self, input_path, output_path, target_language="hi", source_language=None, encoding="utf-8"):
+        with open(input_path, mode="r", encoding=encoding, errors="ignore") as f:
+            reader = list(csv.reader(f))
 
-    def translate(
-        self,
-        input_file,
-        output_file,
-        target_language,
-    ):
+        if not reader:
+            with open(output_path, mode="w", encoding="utf-8-sig", newline="") as f:
+                pass
+            return
 
-        print(
-            "Opening CSV:",
-            input_file,
-        )
+        cell_coords = []
+        texts_to_translate = []
 
-        df = pd.read_csv(
-            input_file,
-            dtype=object,
-            keep_default_na=False,
-        )
+        for r_idx, row in enumerate(reader):
+            for c_idx, val in enumerate(row):
+                if val.strip():
+                    cell_coords.append((r_idx, c_idx))
+                    texts_to_translate.append(val)
 
-        # --------------------------------------------------
-        # Translate every textual cell
-        # --------------------------------------------------
+        if not texts_to_translate:
+            with open(output_path, mode="w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(reader)
+            return
 
-        for column in df.columns:
-
-            for index in df.index:
-
-                value = df.at[
-                    index,
-                    column,
-                ]
-
-                if value is None:
-                    continue
-
-                text = str(
-                    value
-                ).strip()
-
-                if not text:
-                    continue
-
-                print(
-                    f"Cell [{index}, {column}]: "
-                    f"auto -> {target_language}"
+        translated_texts = []
+        for i in range(0, len(texts_to_translate), BATCH_SIZE):
+            chunk = texts_to_translate[i:i + BATCH_SIZE]
+            translated_texts.extend(
+                translation_service.translate_texts(
+                    texts=chunk,
+                    target_language=target_language,
+                    source_language=source_language
                 )
+            )
 
-                # --------------------------------------------------
-                # Do NOT provide source_language.
-                #
-                # TranslationService will call:
-                # detect_language(text)
-                # --------------------------------------------------
+        for (r_idx, c_idx), trans_text in zip(cell_coords, translated_texts):
+            reader[r_idx][c_idx] = trans_text
 
-                translated = (
-                    translation_service.translate_text(
-                        text=text,
-                        target_language=target_language,
-                    )
-                )
-
-                df.at[
-                    index,
-                    column
-                ] = translated
-
-        # --------------------------------------------------
-        # Save translated CSV
-        # --------------------------------------------------
-
-        df.to_csv(
-            output_file,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        print(
-            "Translated CSV saved:",
-            output_file,
-        )
+        with open(output_path, mode="w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(reader)
 
 
 csv_handler = CsvHandler()
