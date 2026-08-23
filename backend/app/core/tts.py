@@ -15,10 +15,10 @@ class TTSError(Exception):
 
 class TTS:
     """
-    Text-to-speech dubbing via Indic Parler-TTS. Used only as a best-effort,
-    non-blocking bonus artifact for finished audio jobs (see
-    pipelines/audio.py) — never on the critical path to marking a job done,
-    since it is by far the slowest stage on CPU.
+    Text-to-speech dubbing via Indic Parler-TTS. Opt-in bonus artifact for
+    audio/video jobs (see pipelines/common.py's maybe_dub) — runs as the
+    final pipeline stage when requested, so it is by far the slowest part of
+    a dubbed job on CPU.
 
     Heavy dependency (parler_tts + descript-audiotools) and the model itself
     (several GB) are imported/loaded lazily so the rest of the app works fine
@@ -29,10 +29,8 @@ class TTS:
 
     SPEAKERS = {"en": "Thoma", "hi": "Rohit", "mr": "Sanjay"}
 
-    def __init__(self, device: str | None = None):
-        self.device = device or config.TTS_DEVICE or (
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
+    def __init__(self, device: str = config.TTS_DEVICE):
+        self.device = device
         self._model = None
         self._tokenizer = None
         self._description_tokenizer = None
@@ -40,6 +38,18 @@ class TTS:
 
     def is_ready(self) -> bool:
         return self._model is not None
+
+    def set_device(self, device: str) -> None:
+        # Not wired to the app-wide GPU toggle (app.core.device.set_device)
+        # -- see the note there before calling this with "cuda". ASR's
+        # ctranslate2 is always in-process here and, at least on Windows,
+        # permanently breaks torch's CUDA/cuDNN symbol resolution once
+        # loaded, so torch (this class) can't safely use CUDA in this app.
+        with self._lock:
+            self.device = device
+            self._model = None
+            self._tokenizer = None
+            self._description_tokenizer = None
 
     def _load(self):
         if self._model is not None:

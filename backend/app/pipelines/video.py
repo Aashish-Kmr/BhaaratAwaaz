@@ -8,7 +8,7 @@ import av
 from app.core.asr import asr
 from app.jobs.models import Job
 from app.jobs.store import JobStore
-from app.pipelines.common import should_stop_fn, translate_segments
+from app.pipelines.common import maybe_dub, should_stop_fn, translate_segments
 
 
 class VideoProcessingError(Exception):
@@ -91,3 +91,5 @@ def run(job: Job, store: JobStore) -> None:
     )
 
     store.save_segments(job.id, segments)
+
+    maybe_dub(job, store, segments, should_stop)

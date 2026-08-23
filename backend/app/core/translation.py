@@ -60,6 +60,13 @@ class Translator:
     def is_ready(self) -> bool:
         return all(self.model_path(t).exists() for t in self.MODEL_DIRS)
 
+    def set_device(self, device: str) -> None:
+        with self._lock:
+            self.device = device
+            self._models = {}
+            self._tokenizers = {}
+            self._processors = {}
+
     def _get_model_type(self, source_language: str, target_language: str) -> str:
         source_is_english = source_language == "en"
         target_is_english = target_language == "en"

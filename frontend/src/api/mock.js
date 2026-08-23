@@ -16,6 +16,7 @@ const uid = () => 'job_' + Math.random().toString(36).slice(2, 10)
 const jobs = new Map() // id -> job
 const segmentsByJob = new Map() // id -> segments[]
 const objectUrls = new Map() // id -> blob url for local preview
+let gpuEnabled = false
 
 function seed() {
   const now = Date.now()
@@ -129,12 +130,25 @@ async function runPipeline(id) {
     }))
     segmentsByJob.set(id, segs)
     update(id, {
+      segmentCount: segs.length,
+      durationSec: segs[segs.length - 1]?.end ?? 0,
+    })
+
+    // Dubbing (if requested) is part of processing, not a background
+    // afterthought -- the job only reaches "done" once it finishes, same as
+    // the real backend.
+    if (job2.includeDubbing && (job2.kind === 'video' || job2.kind === 'audio')) {
+      update(id, { status: 'dubbing', stage: 'Dubbing audio', progress: 0.97 })
+      await sleep(1500)
+      if (jobs.get(id)?.status === 'cancelled') return
+      update(id, { dubbedAudioReady: true })
+    }
+
+    update(id, {
       status: 'done',
       stage: 'Completed',
       progress: 1,
       finishedAt: new Date().toISOString(),
-      segmentCount: segs.length,
-      durationSec: segs[segs.length - 1]?.end ?? 0,
     })
   } finally {
     workerBusy = false
@@ -161,8 +175,16 @@ export const mockApi = {
       queueLength: [...jobs.values()].filter((j) => isRunning(j.status) || j.status === 'queued').length,
       diskFreeGb: 41.6,
       ramTotalGb: 16,
+      gpuAvailable: true,
+      gpuEnabled,
       mock: true,
     }
+  },
+
+  async setDevice(useGpu) {
+    await sleep(150)
+    gpuEnabled = !!useGpu
+    return mockApi.getStatus()
   },
 
   async listJobs() {
@@ -177,7 +199,7 @@ export const mockApi = {
     return job
   },
 
-  async createJob(file, { sourceLang = 'mr', targetLang = 'hi', onProgress } = {}) {
+  async createJob(file, { sourceLang = 'mr', targetLang = 'hi', includeDubbing = false, onProgress } = {}) {
     // Fake the upload byte progress.
     for (let p = 0; p <= 1.0001; p += 0.2) {
       onProgress?.(Math.min(1, p))
@@ -193,6 +215,8 @@ export const mockApi = {
       durationSec: null,
       sourceLang,
       targetLang,
+      includeDubbing,
+      dubbedAudioReady: false,
       status: 'queued',
       progress: 0,
       stage: 'Waiting for worker',
@@ -257,7 +281,11 @@ export const mockApi = {
     return null
   },
 
-  dubbedAudioUrl() {
-    return null
+  // No real TTS behind the mock -- stand in with the original upload's blob
+  // URL so the "Dubbed audio" action is exercisable once a job opts in and
+  // finishes, same as it would be against the real backend.
+  dubbedAudioUrl(job) {
+    if (!job?.dubbedAudioReady) return null
+    return objectUrls.get(job.id) ?? null
   },
 }

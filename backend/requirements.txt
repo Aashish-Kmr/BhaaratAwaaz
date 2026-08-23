@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------
-# BAIF Bhasha - unified backend requirements
+# BAIF Bhasha - unified backend requirements (shared base)
 #
 # Merges BAIF-main (documents), BhaaratAwaaz-main (audio) and
 # BAIF-Video-main (video) into one dependency set. Confirmed-unused deps
@@ -16,6 +16,12 @@
 # a distinct, conflicting specifier and refuses to resolve it, even when it
 # would land on the identical commit. Let parler_tts's own dependency bring
 # it in.
+#
+# This file deliberately excludes torch/torchaudio: those differ between
+# the CPU and GPU builds and live in requirements-cpu.txt / requirements-gpu.txt
+# instead, which both pull in this file via `-r requirements.txt`. Install
+# one of those two directly -- do not `pip install -r requirements.txt` on
+# its own, it has no torch build in it at all. See PACKAGING.md step 2.
 # ----------------------------------------------------------------------
 
 # --- Web framework -----------------------------------------------------
@@ -32,8 +38,7 @@ PyMuPDF>=1.26.3
 Pillow>=11.3.0
 
 # --- Shared ML: translation, ASR, TTS -----------------------------------
-torch==2.13.0
-torchaudio==2.11.0
+# torch/torchaudio are NOT listed here -- see the header note above.
 transformers==4.46.1
 tokenizers==0.20.3
 accelerate>=1.10.0

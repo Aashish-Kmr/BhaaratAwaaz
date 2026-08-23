@@ -87,6 +87,22 @@ export function Field({ label, children, hint }) {
   )
 }
 
+export function Checkbox({ label, checked, onChange, disabled, hint, className }) {
+  return (
+    <label className={cx('flex items-center gap-2 text-sm text-ink-200', disabled && 'opacity-40', className)}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="accent-leaf-500"
+      />
+      {label}
+      {hint && <span className="text-xs text-ink-400">{hint}</span>}
+    </label>
+  )
+}
+
 export function Select({ className, ...props }) {
   return (
     <select
@@ -117,6 +133,20 @@ export function formatDuration(sec) {
   const s = Math.round(sec % 60)
   if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`
   return `${m}m ${String(s).padStart(2, '0')}s`
+}
+
+/** Wall-clock time a job has spent processing: createdAt to finishedAt, or to now if still running. */
+export function elapsedLabel(job) {
+  if (!job.createdAt) return null
+  const start = new Date(job.createdAt).getTime()
+  const end = job.finishedAt ? new Date(job.finishedAt).getTime() : Date.now()
+  const sec = Math.max(0, (end - start) / 1000)
+
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m elapsed`
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s elapsed`
+  return `${s}s elapsed`
 }
 
 export function relativeTime(iso) {

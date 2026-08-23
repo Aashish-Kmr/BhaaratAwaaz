@@ -9,7 +9,9 @@ export const languageLabel = (code) =>
 
 /**
  * Job lifecycle. The backend must report exactly one of these in `status`.
- * queued -> transcribing -> translating -> done
+ * queued -> transcribing -> translating -> [dubbing] -> done
+ * dubbing only occurs for audio/video jobs with includeDubbing set; a job
+ * only reaches "done" after dubbing has actually finished.
  * any state -> failed | cancelled
  */
 export const JOB_STATUS = {
@@ -17,6 +19,7 @@ export const JOB_STATUS = {
   extracting: { label: 'Extracting audio', tone: 'busy' },
   transcribing: { label: 'Transcribing', tone: 'busy' },
   translating: { label: 'Translating', tone: 'busy' },
+  dubbing: { label: 'Dubbing audio', tone: 'busy' },
   done: { label: 'Ready', tone: 'good' },
   failed: { label: 'Failed', tone: 'bad' },
   cancelled: { label: 'Cancelled', tone: 'idle' },
@@ -26,7 +29,10 @@ export const isTerminal = (status) =>
   status === 'done' || status === 'failed' || status === 'cancelled'
 
 export const isRunning = (status) =>
-  status === 'extracting' || status === 'transcribing' || status === 'translating'
+  status === 'extracting' ||
+  status === 'transcribing' ||
+  status === 'translating' ||
+  status === 'dubbing'
 
 export const KIND_BY_EXT = {
   mp4: 'video', mkv: 'video', mov: 'video', avi: 'video', webm: 'video',

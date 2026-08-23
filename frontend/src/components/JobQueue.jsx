@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  elapsedLabel,
   EmptyState,
   KindIcon,
   ProgressBar,
@@ -134,6 +135,8 @@ function JobRow({ job, onOpen, onCancel, onRetry, onDelete }) {
             {job.status === 'done' && job.segmentCount
               ? ` · ${job.segmentCount} segments`
               : ''}
+            {' · '}
+            {elapsedLabel(job)}
           </p>
         </div>
 

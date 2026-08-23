@@ -58,9 +58,9 @@ export const httpApi = {
 
   /**
    * @param {File} file
-   * @param {{sourceLang:string, targetLang:string, onProgress?:(fraction:number)=>void}} opts
+   * @param {{sourceLang:string, targetLang:string, includeDubbing?:boolean, onProgress?:(fraction:number)=>void}} opts
    */
-  createJob(file, { sourceLang, targetLang, onProgress } = {}) {
+  createJob(file, { sourceLang, targetLang, includeDubbing, onProgress } = {}) {
     // XHR rather than fetch: it is the only way to get upload progress,
     // which matters for 500 MB field recordings on a slow local disk.
     return new Promise((resolve, reject) => {
@@ -68,6 +68,7 @@ export const httpApi = {
       form.append('file', file, file.name)
       form.append('source_lang', sourceLang)
       form.append('target_lang', targetLang)
+      form.append('include_dubbing', includeDubbing ? 'true' : 'false')
 
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BASE}/jobs`)
@@ -124,9 +125,14 @@ export const httpApi = {
     return `${BASE}/jobs/${encodeURIComponent(job.id)}/download`
   },
 
-  /** Audio jobs only: bonus AI-voiced dubbed track, once ready. */
+  /** Audio and video jobs: bonus AI-voiced dubbed track, once ready. */
   dubbedAudioUrl(job) {
     return `${BASE}/jobs/${encodeURIComponent(job.id)}/dubbed-audio`
+  },
+
+  /** App-wide: switch ASR/translation/TTS between CPU and GPU. */
+  async setDevice(useGpu) {
+    return request('/settings/device', { method: 'POST', body: { useGpu } })
   },
 }
 

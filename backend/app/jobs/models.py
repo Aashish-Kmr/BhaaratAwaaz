@@ -10,6 +10,7 @@ STATUSES = {
     "extracting",
     "transcribing",
     "translating",
+    "dubbing",
     "done",
     "failed",
     "cancelled",
@@ -56,6 +57,7 @@ class Job:
     finished_at: str | None = None
     error: str | None = None
     segment_count: int = 0
+    include_dubbing: bool = False
     dubbed_audio_ready: bool = False
 
     # Internal, not exposed in the public API shape.
@@ -80,6 +82,7 @@ class Job:
             "finishedAt": self.finished_at,
             "error": self.error,
             "segmentCount": self.segment_count,
+            "includeDubbing": self.include_dubbing,
             "dubbedAudioReady": self.dubbed_audio_ready,
         }
 
