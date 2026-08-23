@@ -1,0 +1,17 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha - CPU build (default)
+#
+# Pulls the base deps from requirements.txt, then a plain CPU-only torch
+# build from the normal PyPI index -- no NVIDIA driver dependency at all,
+# so it runs on any Windows machine, GPU or not. This is what step 2 of
+# PACKAGING.md installs by default.
+#
+# For a machine with a confirmed NVIDIA GPU + driver, use
+# requirements-gpu.txt instead (see PACKAGING.md step 6b) -- don't install
+# both into the same venv.
+# ----------------------------------------------------------------------
+
+-r requirements.txt
+
+torch==2.13.0
+torchaudio==2.11.0

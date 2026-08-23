@@ -7,15 +7,22 @@ from pathlib import Path
 
 def _app_root() -> Path:
     """
-    Root directory the app is running from.
+    Root directory bundled resources (frontend/dist, fonts, the pre-
+    downloaded model weights) ship from.
 
-    When frozen by PyInstaller, `sys.executable` is the bundled binary and
-    everything the app ships (frontend/dist, fonts) lives next to it.
-    Otherwise it's the `backend/` package root (two parents up from this file).
+    When frozen by PyInstaller in --onedir mode, everything except the
+    launcher .exe itself lives under a `_internal/` subfolder next to it
+    (PyInstaller 6.0's default "contents directory" layout) -- NOT directly
+    next to sys.executable. sys._MEIPASS is PyInstaller's own documented way
+    to find that folder regardless of layout details, and for --onedir
+    specifically it's a stable, permanent directory (not re-extracted per
+    launch the way --onefile's temp _MEIPASS is), so it's safe to treat as a
+    normal read location. Otherwise it's the `backend/` package root (two
+    parents up from this file).
     """
 
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
 
     return Path(__file__).resolve().parent.parent
 
@@ -27,8 +34,22 @@ REPO_ROOT = APP_ROOT.parent if not getattr(sys, "frozen", False) else APP_ROOT
 # Data / model / static directories
 # ----------------------------------------------------------------------
 
+# Model weights baked in at build time -- read-only in practice, and inside
+# the app's install folder (e.g. under Program Files), so keep it there.
 DATA_DIR = Path(os.getenv("BAIF_DATA_DIR", APP_ROOT / "data"))
-JOBS_DIR = DATA_DIR / "jobs"
+
+# Job uploads/outputs are written continuously at runtime, unlike the model
+# weights above -- a frozen build is typically installed under Program
+# Files, where a standard (non-admin) user cannot write, so default this to
+# a normal per-user data folder instead of nesting it under DATA_DIR/APP_ROOT
+# like the dev layout does. BAIF_DATA_DIR / BAIF_JOBS_DIR both still override.
+if getattr(sys, "frozen", False) and not os.getenv("BAIF_DATA_DIR"):
+    JOBS_DIR = Path(
+        os.getenv("BAIF_JOBS_DIR", Path(os.environ["LOCALAPPDATA"]) / "BAIF Bhasha" / "jobs")
+    )
+else:
+    JOBS_DIR = Path(os.getenv("BAIF_JOBS_DIR", DATA_DIR / "jobs"))
+
 MODELS_DIR = Path(os.getenv("BAIF_MODELS_DIR", DATA_DIR / "models"))
 TRANSLATION_MODEL_DIR = MODELS_DIR / "translation"
 
@@ -42,6 +63,21 @@ TRANSLATION_MODEL_DIR = MODELS_DIR / "translation"
 # imports, so this is early enough as long as nothing above this line does.
 HF_CACHE_DIR = Path(os.getenv("HF_HOME", DATA_DIR / "hf_cache"))
 os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR))
+
+# huggingface_hub tries to write an updated cache ref pointer on every
+# from_pretrained()/snapshot_download() call, even when the model is already
+# fully cached and nothing actually changed -- confirmed by loading
+# faster-whisper with this unset and watching it touch
+# hf_cache/hub/.../refs/main every time. In a packaged build installed under
+# Program Files, a standard (non-admin) user can't write there, so that
+# turns into a PermissionError the moment a job actually runs a model,
+# despite the app starting up fine. This app is designed to run fully
+# offline once scripts/download_models.py has fetched everything anyway
+# (see PACKAGING.md), so forcing offline mode here avoids the write
+# entirely instead of trying to make the install dir writable.
+# download_models.py explicitly re-enables this before it downloads
+# anything -- that's the one script that needs network access.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 FRONTEND_DIST_DIR = Path(os.getenv("BAIF_FRONTEND_DIST", REPO_ROOT / "frontend" / "dist"))
 FONT_DIR = Path(os.getenv("BAIF_FONT_DIR", REPO_ROOT / "fonts"))
@@ -118,7 +154,7 @@ TRANSLATION_NUM_BEAMS = int(os.getenv("BAIF_TRANSLATION_NUM_BEAMS", "5"))
 # ASR_CPU_THREADS above -- benchmarked no better, sometimes worse, on this
 # machine when forced to all cores).
 TORCH_NUM_THREADS = int(os.environ["BAIF_TORCH_THREADS"]) if os.getenv("BAIF_TORCH_THREADS") else None
-TTS_DEVICE = os.getenv("BAIF_TTS_DEVICE") or None
+TTS_DEVICE = os.getenv("BAIF_TTS_DEVICE", "cpu")
 
 VAD_ENABLED = True
 VAD_MIN_SILENCE_MS = 500

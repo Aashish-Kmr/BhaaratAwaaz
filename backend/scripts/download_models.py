@@ -34,12 +34,18 @@ This is a one-time, per-account step -- there's no way to script around it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import config  # noqa: E402
+
+# config.py defaults HF_HUB_OFFLINE=1 so the running app never tries to
+# write to its (possibly read-only, e.g. under Program Files) model cache --
+# but this script's whole job is downloading, so it needs network access.
+os.environ["HF_HUB_OFFLINE"] = "0"
 
 TRANSLATION_REPOS = {
     "indictrans2-en-indic-dist-200M": "ai4bharat/indictrans2-en-indic-dist-200M",
@@ -60,7 +66,13 @@ def download_translation_models() -> None:
 
         print(f"[translation] {local_name}: downloading {repo_id} ...")
         try:
-            snapshot_download(repo_id=repo_id, local_dir=str(target))
+            # Each repo carries both model.safetensors and a legacy
+            # pytorch_model.bin of the same weights -- transformers uses
+            # safetensors automatically when present, so skip the .bin copy
+            # (it roughly doubles the download/disk footprint for nothing).
+            snapshot_download(
+                repo_id=repo_id, local_dir=str(target), ignore_patterns=["*.bin"]
+            )
         except GatedRepoError:
             print(
                 f"\n[translation] {repo_id} is a gated repo and your Hugging Face "

@@ -52,6 +52,11 @@ class ASR:
     def is_ready(self) -> bool:
         return self._model is not None
 
+    def set_device(self, device: str) -> None:
+        with self._lock:
+            self.device = device
+            self._model = None
+
     def transcribe(
         self,
         audio_path: str | Path,

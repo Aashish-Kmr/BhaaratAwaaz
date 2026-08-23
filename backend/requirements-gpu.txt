@@ -1,0 +1,27 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha - GPU build (optional)
+#
+# Pulls the base deps from requirements.txt, then a CUDA-enabled torch
+# build from PyTorch's own wheel index instead of plain PyPI. Only install
+# this on a machine you've confirmed has a working NVIDIA GPU + recent
+# driver (check with `nvidia-smi`) -- see PACKAGING.md step 6b.
+#
+# `--extra-index-url` adds PyTorch's index alongside PyPI rather than
+# replacing it, so every other package here (transformers, faster-whisper,
+# etc.) still resolves normally from PyPI; only the `+cu121`-suffixed
+# torch/torchaudio versions below force pip to fetch the CUDA build from
+# the extra index, since PyPI has no wheel matching that exact version tag.
+#
+# cu121 is an example, matching the version pin below -- if you bump
+# torch/torchaudio here, check https://pytorch.org/get-started/locally/ for
+# the matching CUDA wheel tag (pick the newest tag that is not newer than
+# what `nvidia-smi` reports the driver supports), and update both the
+# --extra-index-url path and the `+cuXXX` version suffixes together.
+# ----------------------------------------------------------------------
+
+-r requirements.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch==2.13.0+cu121
+torchaudio==2.11.0+cu121

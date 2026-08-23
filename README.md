@@ -21,11 +21,13 @@ See `PACKAGING.md` for turning this into a distributable executable.
 
 Two processes, hot-reloading independently:
 
+**macOS / Linux:**
+
 ```bash
 # Terminal 1 - backend
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-cpu.txt    # or requirements-gpu.txt, see PACKAGING.md
 python scripts/download_models.py      # one-time; see PACKAGING.md for options
 uvicorn app.main:app --reload --reload-dir app
 
@@ -34,6 +36,27 @@ cd frontend
 npm install
 VITE_USE_MOCK=false npm run dev
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+# Terminal 1 - backend
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements-cpu.txt    # or requirements-gpu.txt, see PACKAGING.md
+python scripts\download_models.py      # one-time; see PACKAGING.md for options
+uvicorn app.main:app --reload --reload-dir app
+
+# Terminal 2 - frontend (talks to the backend above via the Vite proxy)
+cd frontend
+npm install
+$env:VITE_USE_MOCK="false"; npm run dev
+```
+
+If `.venv\Scripts\Activate.ps1` is blocked by PowerShell's execution policy,
+run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first (this
+only affects the current terminal session, not the whole machine).
 
 Open the URL Vite prints (default `http://localhost:5173`).
 
@@ -47,13 +70,26 @@ doesn't use `--reload` at all, so it isn't affected.
 
 ## Run as one process (what gets packaged)
 
+**macOS / Linux:**
+
 ```bash
 cd frontend && npm install && VITE_USE_MOCK=false npm run build && cd ..
 cd backend && source .venv/bin/activate && python run.py
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+cd frontend; npm install; $env:VITE_USE_MOCK="false"; npm run build; cd ..
+cd backend; .venv\Scripts\Activate.ps1; python run.py
+```
+
 FastAPI now serves both the API (`/api/*`) and the built UI (`/`) on
 `http://127.0.0.1:8000`, and opens it in your browser automatically.
+
+See `PACKAGING.md` for building this into a standalone Windows `.exe` and
+installer — the target machine for this app is Windows-only, so that's the
+primary packaging path.
 
 ## Supported languages and formats
 
@@ -62,10 +98,26 @@ FastAPI now serves both the API (`/api/*`) and the built UI (`/`) on
 - Documents: `.docx`, `.pptx`, `.xlsx`, `.csv`, `.pdf` (formatting preserved;
   PDF translation uses the bundled Devanagari font).
 - Audio: `.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.flac` — transcript +
-  translated segments in the editor, plus an optional AI-dubbed audio track
-  once it finishes generating in the background.
+  translated segments in the editor, plus an opt-in AI-dubbed audio track
+  (enable "Include dubbing" at upload time) once it finishes generating in
+  the background.
 - Video: `.mp4`, `.mkv`, `.mov`, `.avi`, `.webm` — transcript + translated
-  segments, exportable as SRT/VTT/plain text from the editor.
+  segments, exportable as SRT/VTT/plain text from the editor, plus the same
+  opt-in AI-dubbed audio track as audio jobs (a separate downloadable track,
+  not a re-muxed dubbed video).
+
+## GPU acceleration
+
+ASR, translation and TTS default to CPU. If the machine has a CUDA-capable
+GPU and a matching CUDA build of `torch`/`ctranslate2` installed, toggle
+"Process on GPU" in the UI (or `POST /api/settings/device`) to switch all
+three over. This is an app-wide setting, not per-job — flipping it drops any
+already-loaded models so they reload on the new device next time they're
+used, which briefly slows down whichever job runs right after a switch.
+
+On a low-VRAM GPU, running all three models on GPU at once can be tight —
+watch `nvidia-smi` during a job if you hit instability, and consider a
+smaller `BAIF_ASR_MODEL` (e.g. `small`) to leave more headroom.
 
 ## Tuning speed vs. quality
 
@@ -101,8 +153,9 @@ the actual demo machine before changing these from their defaults.
   (uploaded files and translated documents on disk do). Fine for a
   single-machine demo; would need a persisted job table for anything longer
   lived.
-- Video translation intentionally does not produce a dubbed audio track
-  (subtitles only) — see `backend/app/pipelines/video.py`.
+- Video translation's dubbed audio track is opt-in and, like audio jobs, is a
+  separate downloadable WAV — not a video with its audio track replaced. See
+  `backend/app/pipelines/video.py` and `backend/app/pipelines/common.py`.
 - `ffmpeg` must be on `PATH` for video audio extraction (the only pipeline
   still using an external ffmpeg binary — audio and translation are pure
   Python).

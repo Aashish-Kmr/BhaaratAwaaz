@@ -149,7 +149,8 @@ export default function SubtitleEditor({ job, onBack }) {
     },
   ]
 
-  const dubbedAudioUrl = job.kind === 'audio' && job.dubbedAudioReady ? api.dubbedAudioUrl(job) : null
+  const dubbedAudioUrl =
+    (job.kind === 'audio' || job.kind === 'video') && job.dubbedAudioReady ? api.dubbedAudioUrl(job) : null
 
   const flagged = segments.filter((s) => segmentWarnings(s).length > 0).length
 

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Card, Field, Select, ProgressBar, formatBytes, cx } from './ui.jsx'
+import { Button, Card, Checkbox, Field, Select, ProgressBar, formatBytes, cx } from './ui.jsx'
 import { ACCEPTED_EXTENSIONS, LANGUAGES, MAX_FILE_BYTES, kindOf } from '../lib/constants.js'
 
 export default function UploadPanel({ onSubmit }) {
   const [queue, setQueue] = useState([]) // File[]
   const [sourceLang, setSourceLang] = useState('mr')
   const [targetLang, setTargetLang] = useState('hi')
+  const [includeDubbing, setIncludeDubbing] = useState(false)
   const targetLangs = LANGUAGES.filter((l) => l.code !== sourceLang)
 
   // Keep targetLang valid whenever sourceLang changes out from under it.
@@ -51,7 +52,7 @@ export default function UploadPanel({ onSubmit }) {
     try {
       for (const file of queue) {
         setUploadPct(0)
-        await onSubmit(file, { sourceLang, targetLang, onProgress: setUploadPct })
+        await onSubmit(file, { sourceLang, targetLang, includeDubbing, onProgress: setUploadPct })
       }
       setQueue([])
     } finally {
@@ -159,6 +160,14 @@ export default function UploadPanel({ onSubmit }) {
             ))}
           </Select>
         </Field>
+
+        <Checkbox
+          label="Include dubbing"
+          hint="AI-voiced audio track, generated after processing"
+          checked={includeDubbing}
+          onChange={(e) => setIncludeDubbing(e.target.checked)}
+          disabled={busy}
+        />
 
         <div className="ml-auto flex items-center gap-3">
           {queue.length > 0 && (

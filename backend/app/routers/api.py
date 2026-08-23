@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
 from app import config
+from app.core import device
 from app.core.asr import asr
 from app.core.translation import translator
 from app.core.tts import tts
@@ -26,8 +27,7 @@ def health():
     return {"status": "ok"}
 
 
-@router.get("/status")
-def get_status():
+def _status_dict() -> dict:
     models = [
         {
             "name": f"faster-whisper {config.ASR_MODEL}",
@@ -62,7 +62,26 @@ def get_status():
         "queueLength": queue_length,
         "diskFreeGb": disk_free_gb,
         "ramTotalGb": None,
+        "gpuAvailable": device.gpu_available(),
+        "gpuEnabled": config.ASR_DEVICE == "cuda",
     }
+
+
+@router.get("/status")
+def get_status():
+    return _status_dict()
+
+
+@router.post("/settings/device")
+def set_device(body: dict):
+    use_gpu = bool(body.get("useGpu"))
+
+    if use_gpu and not device.gpu_available():
+        raise api_error(400, "No CUDA-capable GPU is available on this machine.", "gpu_unavailable")
+
+    device.set_device("cuda" if use_gpu else "cpu")
+
+    return _status_dict()
 
 
 @router.get("/jobs")
@@ -87,6 +106,7 @@ async def create_job(
     file: UploadFile = File(...),
     source_lang: str = Form(...),
     target_lang: str = Form(...),
+    include_dubbing: bool = Form(False),
 ):
     source_lang = source_lang.strip().lower()
     target_lang = target_lang.strip().lower()
@@ -133,6 +153,7 @@ async def create_job(
         bytes=size,
         source_lang=source_lang,
         target_lang=target_lang,
+        include_dubbing=include_dubbing,
         input_path=str(input_path),
         job_dir=str(job_dir),
     )
@@ -148,7 +169,7 @@ def cancel_job(job_id: str):
     job = _get_job_or_404(job_id)
 
     if job.status == "queued":
-        store.update(job_id, status="cancelled", stage="Cancelled")
+        store.update(job_id, status="cancelled", stage="Cancelled", finished_at=now_iso())
     elif job.status not in ("done", "failed", "cancelled"):
         store.update(job_id, cancel_requested=True)
 
@@ -254,8 +275,8 @@ def download_result(job_id: str):
 def download_dubbed_audio(job_id: str):
     job = _get_job_or_404(job_id)
 
-    if job.kind != "audio":
-        raise api_error(400, "Only audio jobs produce dubbed audio.", "not_an_audio_job")
+    if job.kind not in ("audio", "video"):
+        raise api_error(400, "Only audio and video jobs produce dubbed audio.", "not_dubbable")
 
     if not job.dubbed_audio_ready or not job.dubbed_audio_file.exists():
         raise api_error(404, "Dubbed audio not ready yet.", "not_ready")

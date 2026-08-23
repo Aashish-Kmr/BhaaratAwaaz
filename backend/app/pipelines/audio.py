@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import threading
-
 from app.core import audio_preprocess
 from app.core.asr import asr
-from app.core.tts import tts
-from app.jobs.models import Job, Segment
+from app.jobs.models import Job
 from app.jobs.store import JobStore
-from app.pipelines.common import should_stop_fn, translate_segments
+from app.pipelines.common import maybe_dub, should_stop_fn, translate_segments
 
 
 def run(job: Job, store: JobStore) -> None:
@@ -55,21 +52,4 @@ def run(job: Job, store: JobStore) -> None:
 
     store.save_segments(job.id, segments)
 
-    # Dubbed-audio (TTS) is a best-effort bonus artifact. It runs on its own
-    # thread so it never blocks the job from being marked "done" or blocks
-    # the single worker from picking up the next queued job.
-    threading.Thread(
-        target=_dub_in_background, args=(job, store, segments), daemon=True
-    ).start()
-
-
-def _dub_in_background(job: Job, store: JobStore, segments: list[Segment]) -> None:
-    try:
-        translated_text = " ".join(s.target for s in segments if s.target).strip()
-        if not translated_text:
-            return
-        tts.synthesize(translated_text, job.target_lang, job.dubbed_audio_file)
-        if store.try_get(job.id) is not None:
-            store.update(job.id, dubbed_audio_ready=True)
-    except Exception:
-        pass
+    maybe_dub(job, store, segments, should_stop)

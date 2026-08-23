@@ -4,7 +4,8 @@ from typing import Callable
 
 from app import config
 from app.core.translation import translator
-from app.jobs.models import Segment
+from app.core.tts import tts
+from app.jobs.models import Job, Segment
 from app.jobs.store import JobStore
 
 
@@ -14,6 +15,40 @@ def should_stop_fn(store: JobStore, job_id: str) -> Callable[[], bool]:
         return job is None or job.cancel_requested
 
     return check
+
+
+def maybe_dub(
+    job: Job,
+    store: JobStore,
+    segments: list[Segment],
+    should_stop: Callable[[], bool],
+) -> None:
+    """
+    Synthesize the dubbed track if the job opted in. Shared by the audio and
+    video pipelines, which otherwise do the same thing: join the translated
+    segment text and synthesize one WAV.
+
+    Runs inline as the last pipeline stage — on the worker's single
+    processing thread, same as every other stage — so a job that asked for
+    dubbing is only ever reported "done" once the dubbed track actually
+    exists, and a synthesis failure fails the job (with a real error)
+    instead of silently finishing without the track the user asked for.
+    """
+
+    if not job.include_dubbing:
+        return
+
+    if should_stop():
+        raise InterruptedError("cancelled")
+
+    store.update(job.id, status="dubbing", stage="Dubbing audio", progress=0.97)
+
+    translated_text = " ".join(s.target for s in segments if s.target).strip()
+    if not translated_text:
+        return
+
+    tts.synthesize(translated_text, job.target_lang, job.dubbed_audio_file)
+    store.update(job.id, dubbed_audio_ready=True)
 
 
 def translate_segments(

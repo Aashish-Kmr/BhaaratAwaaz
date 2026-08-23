@@ -28,12 +28,34 @@ Node.js is needed after this step.
 Use Python 3.12 (torch/transformers wheels for this stack are not yet
 reliable on 3.13+).
 
+CPU and GPU builds need different torch wheels, so they live in separate
+requirements files — `requirements-cpu.txt` and `requirements-gpu.txt` —
+which both pull the rest of the dependency set in from the shared
+`requirements.txt` (that file alone has no torch build in it and is not
+meant to be installed directly). Use the CPU one unless you're doing the
+GPU build in step 6b:
+
+**macOS / Linux:**
+
 ```bash
 cd backend
 python3.12 -m venv .venv
-source .venv/bin/activate     # .venv\Scripts\activate on Windows
-pip install -r requirements.txt
+source .venv/bin/activate
+pip install -r requirements-cpu.txt
 ```
+
+**Windows (PowerShell)** — the primary target for this app's packaged build:
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements-cpu.txt
+```
+
+If activation is blocked by the execution policy, run
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in that terminal
+first.
 
 `parler_tts` installs from GitHub (its own setup.py pulls in
 `descript-audiotools` from git too) — this step needs `git` and network
@@ -43,10 +65,10 @@ the same package as a conflicting specifier even when it would resolve to
 the same commit, and the install fails.
 
 If you don't need the audio-dubbing bonus feature and want a smaller/faster
-install, drop the `parler_tts` and `descript-audio-codec` lines — the rest of
-the app (documents, video subtitles, audio transcript+translation) works
-fine without them; only `POST /api/jobs/{id}/dubbed-audio` becomes
-unreachable.
+install, drop the `parler_tts` and `descript-audio-codec` lines from
+`requirements.txt` — the rest of the app (documents, video subtitles, audio
+transcript+translation) works fine without them; only
+`POST /api/jobs/{id}/dubbed-audio` becomes unreachable.
 
 ## 3. Download the models (do this once, early)
 
@@ -105,16 +127,131 @@ no PyInstaller build required. Change host/port with `BAIF_HOST` /
 pyinstaller pyinstaller.spec
 ```
 
-Output lands in `backend/dist/baif-bhasha/`. This bundles whatever's already
-in `backend/data/models` and `backend/data/hf_cache` at build time (see step
-3) directly into the app, so the built folder runs fully offline on another
+Output lands in `backend/dist/baif-bhasha/` (this works the same on Windows
+as on macOS/Linux — just run it from the PowerShell venv above; the launcher
+is named `baif-bhasha.exe` there). This bundles whatever's already in
+`backend/data/models` and `backend/data/hf_cache` at build time (see step 3)
+directly into the app, so the built folder runs fully offline on another
 machine with no download or Hugging Face login needed there. Copy the whole
 `backend/dist/baif-bhasha/` folder to the target machine and run the
 `baif-bhasha` (or `baif-bhasha.exe`) launcher inside it.
 
 `ffmpeg` is not bundled by the spec file — copy an `ffmpeg` binary for the
 target OS into the built folder (or ensure it's already on `PATH` there); the
-video pipeline shells out to it for audio extraction.
+video pipeline shells out to it for audio extraction. **On Windows**:
+download a static build (e.g. the "essentials" build from
+https://www.gyan.dev/ffmpeg/builds/ or from
+https://github.com/BtbN/FFmpeg-Builds/releases), and copy just `ffmpeg.exe`
+directly into `backend\dist\baif-bhasha\` next to `baif-bhasha.exe` — no
+system PATH changes needed, since Windows always checks the launcher's own
+folder first.
+
+## 6. (Optional) Build a Windows installer
+
+Wraps the `backend\dist\baif-bhasha\` folder from step 5 (with `ffmpeg.exe`
+already copied in, per the note above) into a proper installer — Start Menu
+shortcut, uninstaller entry in "Add or remove programs" — instead of asking
+someone to copy a raw folder around.
+
+Requires [Inno Setup](https://jrsoftware.org/isinfo.php) installed on the
+build machine (a new external tool, not otherwise part of this repo).
+
+```powershell
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss
+```
+
+Run from the repo root, after step 5 has produced
+`backend\dist\baif-bhasha\`. Output is
+`packaging\windows\output\BAIF-Bhasha-Setup.exe` — a single installer that
+copies everything into `Program Files`, adds a Start Menu shortcut, and
+registers an uninstaller. See the comment header in
+`packaging/windows/installer.iss` for what it bundles.
+
+## 6b. GPU build variant (optional)
+
+The default install (step 2, `requirements-cpu.txt`) pulls a **CPU-only**
+torch build — it has no NVIDIA driver dependency at all, so it's guaranteed
+to run on any Windows machine, GPU or not. That also means the "Process on
+GPU" toggle in the UI will always show as unavailable in a normally-built
+app, even on a machine with a good GPU: a CPU-only torch build has no CUDA
+support compiled in to turn on, regardless of the hardware.
+
+If you specifically know the target/demo machine has an NVIDIA GPU and a
+recent driver (check with `nvidia-smi`), build a **separate GPU-enabled
+installer** instead of changing the default one. Use a fresh venv (or
+`pip uninstall torch torchaudio -y` in the existing one first) and install
+`requirements-gpu.txt` instead of `requirements-cpu.txt`:
+
+```powershell
+cd backend
+py -3.12 -m venv .venv-gpu
+.venv-gpu\Scripts\Activate.ps1
+pip install -r requirements-gpu.txt
+```
+
+`requirements-gpu.txt` pins the `cu121` CUDA wheel tag as an example — check
+https://pytorch.org/get-started/locally/ and, if a different tag is needed
+(pick Windows / Pip / Python / whatever CUDA version is closest to, but not
+newer than, what `nvidia-smi` reports as supported), update the
+`--extra-index-url` line and the `+cuXXX` version suffixes in that file to
+match before installing. Verify before continuing:
+
+```powershell
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+Then build and package exactly as steps 4–6 (from this GPU venv), but set
+`BAIF_BUILD_VARIANT=gpu` before compiling the installer so the output is
+clearly labelled and never mistaken for the CPU one:
+
+```powershell
+pyinstaller pyinstaller.spec
+# copy ffmpeg.exe in, same as step 5
+$env:BAIF_BUILD_VARIANT = "gpu"
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss
+```
+
+Output is `packaging\windows\output\BAIF-Bhasha-Setup-GPU.exe`. Both
+variants share one app identity in Windows (same `AppId` in
+`installer.iss`), so installing one over the other upgrades in place rather
+than leaving two copies — don't install both side by side on the same
+machine.
+
+**Only build this variant on hardware you've confirmed has a working NVIDIA
+driver.** A GPU-enabled torch build's DLLs depend on the driver being
+present to load correctly; the backend guards every CUDA check with a
+`try/except` that falls back to reporting "no GPU" rather than crashing (see
+`app/core/device.py`'s `gpu_available()`), but that safety net is about
+avoiding a *crash* on a driver-less machine, not about making CUDA actually
+usable there — for that, the machine still needs a real GPU and driver.
+
+## 6c. Building on a roomier drive
+
+The `--onedir` build with models baked in is easily 5-15+ GB, and Inno
+Setup's own single-file `Setup.exe` output is capped at ~4.2 GB (it errors
+with "Disk spanning must be enabled..." past that, unless you actually want
+a multi-file spanned installer). If the system drive doesn't have room for
+the build, models, and installer output all at once, point the heavy steps
+at another drive instead of moving the whole repo:
+
+```powershell
+# Step 4 -- send the PyInstaller output to another drive:
+pyinstaller pyinstaller.spec --distpath D:\baif-build\dist --workpath D:\baif-build\build
+
+# Step 6 -- tell installer.iss where that output landed, and send the
+# compiled installer there too instead of packaging\windows\output:
+$env:BAIF_BUILD_DIR = "D:\baif-build\dist\baif-bhasha"
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /O"D:\baif-build\output" packaging\windows\installer.iss
+```
+
+To shrink the build itself rather than relocate it, set
+`BAIF_PACKAGE_SKIP_TTS=1` before step 4 to leave the Parler-TTS weights (by
+far the largest single model, several GB) out of what gets bundled — same
+idea as `download_models.py --skip-tts`, but applied at packaging time so
+you can keep the weights cached locally for dev use while still shipping a
+smaller installer. A build made this way will fail a job that has "Include
+dubbing" checked (no cached weights, no internet on the target machine)
+instead of producing a dubbed track.
 
 ## Notes
 
