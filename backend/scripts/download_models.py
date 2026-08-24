@@ -20,7 +20,8 @@ except faster-whisper): before this script can fetch them, log into a
 Hugging Face account, visit each repo page below, and request/accept access
 (the three IndicTrans2 ones are usually instant; indic-parler-tts says
 "authorized list" and may need manual review), then run `huggingface-cli
-login` (or set `HF_TOKEN`) in this shell so the download requests are
+login` (or set `HF_TOKEN`, or paste the token into a `.env` file at the
+repo root -- see `_load_hf_token` below) so the download requests are
 authenticated:
 
     https://huggingface.co/ai4bharat/indictrans2-en-indic-dist-200M
@@ -46,6 +47,70 @@ from app import config  # noqa: E402
 # write to its (possibly read-only, e.g. under Program Files) model cache --
 # but this script's whole job is downloading, so it needs network access.
 os.environ["HF_HUB_OFFLINE"] = "0"
+
+
+def _load_hf_token() -> str | None:
+    """
+    Find a Hugging Face token and put it where huggingface_hub looks.
+
+    `huggingface-cli login` is still the nicest way to do this on a machine
+    you own, but it isn't available everywhere this script runs: a Docker
+    build has no interactive shell, and someone handed a zip of this repo
+    for a demo shouldn't have to learn a second CLI to get past a gated
+    repo. So a token in a plain file works too, checked in this order:
+
+      1. HF_TOKEN / HUGGING_FACE_HUB_TOKEN already in the environment
+         (what Docker Compose passes through from .env)
+      2. the file named by BAIF_HF_TOKEN_FILE (a BuildKit secret mount,
+         during a `--build-arg BAKE_MODELS=1` image build)
+      3. hf_token.txt or .env, in the repo root or in backend/
+
+    Files may be either a bare token on a line of their own or KEY=VALUE
+    lines; surrounding quotes and Windows CRs are stripped either way.
+    Returning None is fine -- huggingface_hub then falls back to whatever
+    `huggingface-cli login` cached, and only the gated repos fail.
+    """
+
+    for env_var in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        token = os.environ.get(env_var, "").strip()
+        if token:
+            os.environ["HF_TOKEN"] = token
+            return token
+
+    here = Path(__file__).resolve().parent.parent  # backend/
+    candidates = []
+    if os.environ.get("BAIF_HF_TOKEN_FILE"):
+        candidates.append(Path(os.environ["BAIF_HF_TOKEN_FILE"]))
+    for directory in (here.parent, here):
+        candidates += [directory / "hf_token.txt", directory / ".env"]
+
+    for path in candidates:
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        token = None
+        for line in raw.splitlines():
+            line = line.strip().strip("\ufeff")
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                if key.strip().upper() in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+                    token = value
+                    break
+            elif token is None:
+                token = line  # bare-token file
+
+        token = (token or "").strip().strip("\"'")
+        if token:
+            os.environ["HF_TOKEN"] = token
+            print(f"[auth] using Hugging Face token from {path}")
+            return token
+
+    return None
+
 
 TRANSLATION_REPOS = {
     "indictrans2-en-indic-dist-200M": "ai4bharat/indictrans2-en-indic-dist-200M",
@@ -127,6 +192,13 @@ def main() -> None:
         "--skip-translation", action="store_true", help="skip the IndicTrans2 download"
     )
     args = parser.parse_args()
+
+    if _load_hf_token() is None:
+        print(
+            "[auth] no HF_TOKEN found in the environment, hf_token.txt or .env -- "
+            "falling back to any `huggingface-cli login` credentials.\n"
+            "       Gated repos will fail without one; see the module docstring."
+        )
 
     if not args.skip_translation:
         download_translation_models()

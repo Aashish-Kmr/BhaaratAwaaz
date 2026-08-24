@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import webbrowser
 
@@ -15,7 +16,13 @@ def _open_browser_when_ready(url: str) -> None:
 
 def main() -> None:
     url = f"http://{config.MEDIA_HOST}:{config.MEDIA_PORT}"
-    _open_browser_when_ready(url)
+
+    # A container has no browser to open, and webbrowser.open() failing in a
+    # background thread there prints a traceback that looks alarming next to
+    # an otherwise healthy startup. docker/Dockerfile sets this to 0; the
+    # desktop/PyInstaller path leaves it unset and keeps the old behaviour.
+    if os.getenv("BAIF_OPEN_BROWSER", "1") != "0":
+        _open_browser_when_ready(url)
 
     # Pass the app object directly rather than the "app.main:app" import
     # string uvicorn also accepts: PyInstaller bundles by statically tracing

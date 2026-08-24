@@ -1,0 +1,79 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha -- "models baked into the image" variant.
+#
+# A STANDALONE compose file (not an override of docker-compose.yml -- it
+# replaces it), used when you want an image that needs no Hugging Face
+# token, no account, and no network on the machine that finally runs it:
+#
+#     docker compose -f docker/compose.baked.yml build
+#     docker compose -f docker/compose.baked.yml up
+#
+# The build reads your token from ../.env via a BuildKit secret mount, which
+# leaves nothing behind in the image, and downloads the weights into an
+# image layer instead of a volume. Result: an image several GB larger that
+# can be handed to someone else whole (`docker save` / a private registry)
+# and just runs.
+#
+# Note the deliberate absence of a volume over /app/backend/data: Docker
+# seeds a new named volume from whatever the image already has at that path,
+# so mounting one there would copy several GB of weights onto disk a second
+# time on first start. Job files get their own small volume at /data
+# instead, which is all that actually needs to survive a restart.
+# ----------------------------------------------------------------------
+
+services:
+  baif:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BAKE_MODELS: "1"
+      secrets:
+        - hf_env
+    image: baif-bhasha:cpu-models
+    container_name: baif-bhasha
+
+    ports:
+      - "${BAIF_HOST_PORT:-8000}:8000"
+
+    environment:
+      BAIF_HOST: "0.0.0.0"
+      BAIF_PORT: "8000"
+      BAIF_OPEN_BROWSER: "0"
+      BAIF_ASR_MODEL: "${BAIF_ASR_MODEL:-medium}"
+      # The weights are already in the image -- never reach for the network.
+      BAIF_SKIP_MODEL_SETUP: "1"
+      # Keep the one genuinely write-heavy directory on a volume.
+      BAIF_JOBS_DIR: /data/jobs
+
+    volumes:
+      - baif-jobs:/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
+    shm_size: "1gb"
+    # Docker's bundled init as PID 1, so the ffmpeg subprocesses the video
+    # pipeline spawns get reaped instead of piling up as zombies.
+    init: true
+
+    stop_grace_period: 30s
+
+    # Deliberately not `unless-stopped`. If the app exits because of a
+    # misconfiguration -- a missing or unaccepted Hugging Face token being
+    # the likely one -- a restart policy turns a single readable error into
+    # an endlessly scrolling one. Switch it to `unless-stopped` once the
+    # setup is known-good and you want the app back automatically after a
+    # reboot.
+    restart: "no"
+
+secrets:
+  hf_env:
+    file: ../.env
+
+volumes:
+  baif-jobs:

@@ -15,7 +15,20 @@ and Marathi (any pair), running entirely on one machine.
   standalone projects this app was consolidated from. Left in place as
   reference; not used at runtime.
 
-See `PACKAGING.md` for turning this into a distributable executable.
+See [PACKAGING.md](PACKAGING.md) for turning this into a distributable
+executable, or [DOCKER.md](DOCKER.md) to run the whole thing in a container
+(one `docker compose up`, no Python/Node/ffmpeg install — the easiest path on
+Windows).
+
+## Quickest way to run it
+
+```powershell
+Copy-Item .env.example .env    # paste a Hugging Face token into it
+docker compose up --build      # or double-click start-docker.bat
+```
+
+Then open <http://localhost:8000>. See [DOCKER.md](DOCKER.md) for what the
+token is for and why the first run is slow.
 
 ## Run in development
 

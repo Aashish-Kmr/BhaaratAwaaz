@@ -1,0 +1,87 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha -- CPU container
+#
+#   docker compose up --build      start (first run also downloads models)
+#   docker compose down            stop, keeping the downloaded models
+#   docker compose down -v         stop and DELETE the models volume too
+#
+# Then open http://localhost:8000
+#
+# Compose reads the .env file sitting next to this one automatically, so the
+# HF_TOKEN you paste there lands in the container without appearing on any
+# command line or inside any image layer. See DOCKER.md.
+# ----------------------------------------------------------------------
+
+services:
+  baif:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: baif-bhasha:cpu
+    container_name: baif-bhasha
+
+    # Left side = the port on your machine. If something else already owns
+    # 8000, set BAIF_HOST_PORT=8080 in .env instead of editing this file.
+    ports:
+      - "${BAIF_HOST_PORT:-8000}:8000"
+
+    environment:
+      # Bind to all interfaces inside the container -- config.py's
+      # 127.0.0.1 default would only be reachable from within the container.
+      BAIF_HOST: "0.0.0.0"
+      BAIF_PORT: "8000"
+      # No browser to open in here; the host-side helper script does that.
+      BAIF_OPEN_BROWSER: "0"
+
+      # Downloaded and used by faster-whisper. `small` or `base` are much
+      # faster and much smaller if the demo machine is modest -- changing
+      # this makes the next start fetch the new model into the same volume.
+      BAIF_ASR_MODEL: "${BAIF_ASR_MODEL:-medium}"
+
+      # 1 = also fetch Indic Parler-TTS (several GB, separately gated) so
+      # the audio-dubbing bonus works. Everything else runs without it.
+      BAIF_INCLUDE_TTS: "${BAIF_INCLUDE_TTS:-0}"
+
+      # Read from .env by compose. Only needed until the models finish
+      # downloading once.
+      HF_TOKEN: "${HF_TOKEN:-}"
+
+    volumes:
+      # A *named volume*, deliberately, not a bind mount to a host folder:
+      # on Windows, bind mounts cross the WSL2 filesystem boundary, which
+      # makes reading multi-GB model weights on every job painfully slow and
+      # brings its own file-permission surprises. Nothing here needs to be
+      # visible from the host -- uploads and results both move through the
+      # web UI.
+      - baif-data:/app/backend/data
+
+    # Model loading on a cold CPU start is slow; don't let the healthcheck
+    # call it unhealthy while it's still legitimately warming up.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
+    # torch allocates shared-memory tensors out of /dev/shm, and Docker's
+    # 64 MB default is small enough that a large batch can hit "bus error"
+    # rather than an honest out-of-memory message.
+    shm_size: "1gb"
+
+    # Docker's bundled init as PID 1, so the ffmpeg subprocesses the video
+    # pipeline spawns get reaped instead of piling up as zombies.
+    init: true
+
+    stop_grace_period: 30s
+
+    # Deliberately not `unless-stopped`. If the app exits because of a
+    # misconfiguration -- a missing or unaccepted Hugging Face token being
+    # the likely one -- a restart policy turns a single readable error into
+    # an endlessly scrolling one. Switch it to `unless-stopped` once the
+    # setup is known-good and you want the app back automatically after a
+    # reboot.
+    restart: "no"
+
+volumes:
+  baif-data:

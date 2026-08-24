@@ -19,9 +19,15 @@ frontend/dist/
 npm-debug.log*
 
 # --- Env / secrets ---------------------------------------------------------
+# `.env` holds the Hugging Face token the Docker build/run reads (DOCKER.md).
+# Keeping it untracked is not just tidiness: Hugging Face and GitHub both
+# scan public pushes for tokens and revoke on sight, so a committed token
+# stops working -- share the file out of band, or ship a BAKE_MODELS=1 image
+# that needs no token at all.
 .env
 .env.*
 !.env.example
+hf_token.txt
 
 # --- PyInstaller build output ----------------------------------------------
 backend/build/

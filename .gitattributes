@@ -1,0 +1,15 @@
+# Shell scripts that run *inside* the Linux container must keep LF endings.
+# Without this, a clone on Windows with core.autocrlf=true rewrites them to
+# CRLF and the container fails at startup with the classic and very
+# unhelpful `exec /app/docker/entrypoint.sh: no such file or directory`
+# (the "missing file" is really the interpreter `/usr/bin/env bash\r`).
+# The Dockerfile strips CRs defensively too, but fixing it at the source is
+# what keeps a Windows checkout honest.
+*.sh text eol=lf
+docker/entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Windows-only helpers stay CRLF so they open cleanly in Notepad.
+*.bat text eol=crlf
+*.ps1 text eol=crlf

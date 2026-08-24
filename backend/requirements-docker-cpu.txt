@@ -1,0 +1,27 @@
+# ----------------------------------------------------------------------
+# BAIF Bhasha - CPU build for the Docker image (Linux containers)
+#
+# Same intent as requirements-cpu.txt, but Linux needs a different torch
+# source. On Windows, plain `pip install torch` from PyPI already gives a
+# CPU-only wheel -- on Linux it does NOT: the PyPI Linux wheel declares
+# cuda-toolkit, nvidia-cudnn-cu13, nvidia-nccl-cu13 and triton as hard
+# dependencies, so installing it drags ~3-4 GB of NVIDIA runtime into the
+# image that a CPU container can never use.
+#
+# PyTorch's own index publishes explicitly CPU-only `+cpu` builds with none
+# of those dependencies, so that's what this file pulls. `--extra-index-url`
+# adds it alongside PyPI rather than replacing it, so every other package
+# still resolves from PyPI as normal; only the `+cpu`-suffixed versions
+# below force pip to the extra index, since PyPI has no wheel matching that
+# exact version tag.
+#
+# Keep the version numbers here in sync with requirements-cpu.txt -- they
+# are the same torch release, just the CPU-only Linux variant of it.
+# ----------------------------------------------------------------------
+
+-r requirements.txt
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.13.0+cpu
+torchaudio==2.11.0+cpu

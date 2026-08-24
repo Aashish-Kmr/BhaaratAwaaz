@@ -7,6 +7,12 @@ gated-access step — do it once, first, on whatever machine has good internet
 and time to spare, then everything downstream (building, copying to the demo
 machine, running) is fast and fully offline.
 
+**If you don't need a native executable at all**, there's a shorter road:
+[DOCKER.md](DOCKER.md) runs the same CPU build in a container, which on
+Windows skips the Python 3.12 install, the Node build, the venv/execution-
+policy dance, and the manual `ffmpeg.exe` copy in one go. The rest of this
+document is for building the standalone `.exe` and installer.
+
 **Fastest path for a live demo**: if you're short on time, you don't need a
 built executable at all — steps 1, 2, and 4 below get you a working app via
 `python run.py` (step 5). Treat step 3 (the actual PyInstaller build) as
@@ -98,8 +104,21 @@ script:
    "authorized list" rather than a plain agree-and-go gate, so it may take
    longer or need manual review — if you're short on time, use `--skip-tts`
    and come back to it later; nothing else depends on it.
-2. Authenticate this shell: `huggingface-cli login` (paste a token from
-   https://huggingface.co/settings/tokens), or `export HF_TOKEN=hf_...`.
+2. Authenticate. Any one of these works — `download_models.py` checks them
+   in this order:
+   - `HF_TOKEN` in the environment (`export HF_TOKEN=hf_...`, or
+     `$env:HF_TOKEN="hf_..."` on Windows)
+   - a `.env` file in the repo root with `HF_TOKEN=hf_...` in it — the same
+     file the Docker setup uses, so you only paste the token once. Copy
+     `.env.example` to `.env` to start one.
+   - a `hf_token.txt` in the repo root holding just the token
+   - whatever `huggingface-cli login` has already cached
+
+   The file-based options exist so a machine that isn't yours (or a Docker
+   build, which has no interactive shell) doesn't need a second CLI tool
+   just to get past a gated repo. `.env` and `hf_token.txt` are both
+   gitignored — see the note in DOCKER.md section 2 about why a committed
+   token stops working.
 3. Re-run `python scripts/download_models.py` (already-downloaded models are
    skipped automatically, so it's safe to re-run after getting access to
    just one more repo).

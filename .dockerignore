@@ -1,0 +1,57 @@
+# ----------------------------------------------------------------------
+# Keep the Docker build context small and predictable.
+#
+# `backend/data/` alone is 7-8 GB of model weights on a dev machine -- if it
+# isn't excluded here, every `docker build` spends minutes just uploading it
+# to the daemon (and on Windows, across the WSL2 filesystem boundary, much
+# longer than that). The image gets its models either at first container
+# start or via the optional BAKE_MODELS build arg, never by copying this
+# folder in.
+# ----------------------------------------------------------------------
+
+# --- Heavy runtime state -----------------------------------------------
+backend/data/
+backend/build/
+backend/dist/
+backend/.venv/
+backend/.venv-gpu/
+
+# --- Node ---------------------------------------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+npm-debug.log*
+
+# --- Python -------------------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# --- Secrets: never bake these into an image layer ----------------------
+# The token reaches the build only as a BuildKit `--mount=type=secret`
+# (which leaves no layer behind), and reaches a running container only as
+# an environment variable from compose. See DOCKER.md.
+.env
+.env.*
+!.env.example
+hf_token.txt
+
+# --- Source projects not used by the integrated app ---------------------
+BAIF-main/
+BhaaratAwaaz-main/
+BAIF-Video-main/
+
+# --- Git / IDE / OS -----------------------------------------------------
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Docs and packaging output ------------------------------------------
+packaging/windows/output/
+*.log

@@ -9,6 +9,11 @@
 # For a machine with a confirmed NVIDIA GPU + driver, use
 # requirements-gpu.txt instead (see PACKAGING.md step 6b) -- don't install
 # both into the same venv.
+#
+# The Docker image uses requirements-docker-cpu.txt, which pins the same
+# torch release but pulls the Linux CPU-only wheel from PyTorch's index --
+# on Linux (unlike Windows) plain PyPI torch hard-depends on the NVIDIA CUDA
+# stack. Bump the versions in both files together.
 # ----------------------------------------------------------------------
 
 -r requirements.txt
