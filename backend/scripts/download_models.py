@@ -151,12 +151,57 @@ def download_translation_models() -> None:
         print(f"[translation] {local_name}: done")
 
 
+# Both pipelines now use "medium" -- audio via vendor/audio_ba's Config,
+# video via Transcriber.MODEL_SIZE. Video was raised from "small" for
+# better Indic accuracy, which also means only one Whisper model has to
+# ship. If you drop video back to "small", add it back here.
+ASR_MODELS = ("medium",)
+
+
 def download_asr_model() -> None:
     from faster_whisper import WhisperModel
 
-    print(f"[asr] warming faster-whisper '{config.ASR_MODEL}' cache ...")
-    WhisperModel(config.ASR_MODEL, device=config.ASR_DEVICE, compute_type=config.ASR_COMPUTE_TYPE)
-    print("[asr] done")
+    for size in ASR_MODELS:
+        print(f"[asr] warming faster-whisper '{size}' cache ...")
+        WhisperModel(size, device="cpu", compute_type="int8")
+        print(f"[asr] {size}: done")
+
+
+def download_video_translation_model() -> None:
+    """
+    NLLB-200 distilled 600M -- used by the vendored video pipeline
+    (vendor/video_baif/services/translator.py). Not gated, so this needs
+    no Hugging Face login, but it is a ~2.4 GB download.
+
+    This repo publishes weights only as pytorch_model.bin (no safetensors
+    variant), so unlike the IndicTrans2 downloads above there is no
+    redundant second format to skip.
+
+    Large single-file downloads over a slow link are the one step here
+    that regularly times out mid-transfer, so this retries; huggingface_hub
+    resumes from the partial blob rather than restarting.
+    """
+
+    from huggingface_hub import snapshot_download
+
+    model_name = "facebook/nllb-200-distilled-600M"
+    attempts = 5
+
+    print(f"[video-translation] warming {model_name} cache (~2.4 GB) ...")
+
+    for attempt in range(1, attempts + 1):
+        try:
+            snapshot_download(repo_id=model_name)
+            break
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            print(
+                f"[video-translation] attempt {attempt}/{attempts} failed "
+                f"({type(exc).__name__}); resuming ..."
+            )
+
+    print("[video-translation] done")
 
 
 def download_tts_model() -> None:
@@ -187,9 +232,14 @@ def download_tts_model() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-tts", action="store_true", help="skip the Parler-TTS download")
-    parser.add_argument("--skip-asr", action="store_true", help="skip the Whisper download")
+    parser.add_argument("--skip-asr", action="store_true", help="skip the Whisper downloads")
     parser.add_argument(
         "--skip-translation", action="store_true", help="skip the IndicTrans2 download"
+    )
+    parser.add_argument(
+        "--skip-video-translation",
+        action="store_true",
+        help="skip the NLLB-200 download used by the video pipeline",
     )
     args = parser.parse_args()
 
@@ -202,6 +252,8 @@ def main() -> None:
 
     if not args.skip_translation:
         download_translation_models()
+    if not args.skip_video_translation:
+        download_video_translation_model()
     if not args.skip_asr:
         download_asr_model()
     if not args.skip_tts:

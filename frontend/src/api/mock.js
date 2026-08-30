@@ -16,7 +16,6 @@ const uid = () => 'job_' + Math.random().toString(36).slice(2, 10)
 const jobs = new Map() // id -> job
 const segmentsByJob = new Map() // id -> segments[]
 const objectUrls = new Map() // id -> blob url for local preview
-let gpuEnabled = false
 
 function seed() {
   const now = Date.now()
@@ -169,22 +168,18 @@ export const mockApi = {
       online: true,
       offlineMode: true,
       models: [
-        { name: 'faster-whisper small (mr)', task: 'asr', loaded: true, sizeMb: 484 },
-        { name: 'IndicTrans2 dist-200M', task: 'mt', loaded: true, sizeMb: 812 },
+        { name: 'IndicTrans2 (documents)', task: 'translation', loaded: true, sizeMb: 812 },
+        { name: 'faster-whisper medium (audio)', task: 'asr', loaded: true, sizeMb: 1530 },
+        { name: 'IndicTrans2 (audio)', task: 'translation', loaded: true, sizeMb: 812 },
+        { name: 'Indic Parler-TTS (dubbing)', task: 'tts', loaded: false, sizeMb: 3600 },
+        { name: 'faster-whisper medium (video)', task: 'asr', loaded: true, sizeMb: 1530 },
+        { name: 'NLLB-200 distilled 600M (video)', task: 'translation', loaded: false, sizeMb: 2400 },
       ],
       queueLength: [...jobs.values()].filter((j) => isRunning(j.status) || j.status === 'queued').length,
       diskFreeGb: 41.6,
-      ramTotalGb: 16,
-      gpuAvailable: true,
-      gpuEnabled,
+      cpuOnly: true,
       mock: true,
     }
-  },
-
-  async setDevice(useGpu) {
-    await sleep(150)
-    gpuEnabled = !!useGpu
-    return mockApi.getStatus()
   },
 
   async listJobs() {
@@ -217,6 +212,8 @@ export const mockApi = {
       targetLang,
       includeDubbing,
       dubbedAudioReady: false,
+      burnInStatus: 'idle',
+      burnInError: null,
       status: 'queued',
       progress: 0,
       stage: 'Waiting for worker',
@@ -286,6 +283,23 @@ export const mockApi = {
   // finishes, same as it would be against the real backend.
   dubbedAudioUrl(job) {
     if (!job?.dubbedAudioReady) return null
+    return objectUrls.get(job.id) ?? null
+  },
+
+  // No ffmpeg behind the mock, so the render is simulated: it moves
+  // through the same idle -> rendering -> ready states the real backend
+  // reports, and hands back the original upload to stand in for the
+  // burned-in file.
+  async startBurnIn(id) {
+    update(id, { burnInStatus: 'rendering', burnInError: null })
+    sleep(2500).then(() => {
+      if (jobs.has(id)) update(id, { burnInStatus: 'ready' })
+    })
+    return jobs.get(id)
+  },
+
+  burnedInVideoUrl(job) {
+    if (job?.burnInStatus !== 'ready') return null
     return objectUrls.get(job.id) ?? null
   },
 }

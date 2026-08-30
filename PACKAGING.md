@@ -83,17 +83,25 @@ python scripts/download_models.py
 ```
 
 This fetches, into `backend/data/`:
-1. Three IndicTrans2 checkpoints (~600 MB combined) — required for all
-   translation (documents, audio, video).
-2. The faster-whisper ASR model (~1.5 GB for the `medium` default; set
-   `BAIF_ASR_MODEL=small` or `base` before running for a smaller/faster
-   model — worth doing if you're tight on time or on modest hardware).
-3. Indic Parler-TTS (several GB) — only needed for the audio-dubbing bonus;
+1. Three IndicTrans2 checkpoints (~3.1 GB combined) — used by the document
+   and audio pipelines.
+2. **NLLB-200 distilled 600M** (~2.4 GB) — used by the *video* pipeline,
+   which translates with NLLB rather than IndicTrans2. Not gated, so no
+   Hugging Face login needed for this one. `--skip-video-translation`
+   leaves it out (video jobs then fail at the translation step).
+3. faster-whisper `medium` (~1.5 GB) — shared by the audio and video
+   pipelines. Video was raised from `small` to `medium` for better Indic
+   accuracy, which conveniently means only one Whisper model ships.
+4. Indic Parler-TTS (~3.6 GB) — only needed for the audio-dubbing bonus;
    pass `--skip-tts` to leave it out and save real time/bandwidth.
 
-**Four of these five repos are gated on Hugging Face** (everything except
-faster-whisper) and this is the one step that needs a human, not just a
-script:
+The two large single-file downloads (NLLB and Parler-TTS) are the ones
+that tend to time out on a slow link; the script retries and
+huggingface_hub resumes from the partial file rather than restarting.
+
+**Four of these repos are gated on Hugging Face** (everything except
+faster-whisper and NLLB-200) and this is the one step that needs a human,
+not just a script:
 1. Log into a Hugging Face account and request/accept access on each page:
    - https://huggingface.co/ai4bharat/indictrans2-en-indic-dist-200M
    - https://huggingface.co/ai4bharat/indictrans2-indic-en-dist-200M

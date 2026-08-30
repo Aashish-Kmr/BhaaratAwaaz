@@ -36,6 +36,13 @@ openpyxl>=3.1.5
 pandas>=2.3.1
 PyMuPDF>=1.26.3
 Pillow>=11.3.0
+# Source-language auto-detection in the vendored document pipeline
+# (vendor/docs_baif/utils/language.py) when the caller passes none.
+langdetect>=1.0.9
+
+# --- Video subtitles (BAIF-Video-main) ----------------------------------
+# SRT generation in vendor/video_baif/services/subtitles.py.
+pysrt>=1.1.2
 
 # --- Shared ML: translation, ASR, TTS -----------------------------------
 # torch/torchaudio are NOT listed here -- see the header note above.

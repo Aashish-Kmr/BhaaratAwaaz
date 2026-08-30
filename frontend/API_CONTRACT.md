@@ -33,7 +33,9 @@ websockets, no third-party services, no outbound internet.
   "error": null,
   "segmentCount": 0,
   "includeDubbing": false,
-  "dubbedAudioReady": false
+  "dubbedAudioReady": false,
+  "burnInStatus": "idle",
+  "burnInError": null
 }
 ```
 
@@ -48,17 +50,24 @@ websockets, no third-party services, no outbound internet.
 | `stage` | string | free text shown verbatim in the UI |
 | `error` | string \| null | set only when `status = "failed"` |
 | `segmentCount` | int | 0 until `done`; always 0 for documents |
-| `includeDubbing` | bool | set from `include_dubbing` at upload time; audio/video jobs only, ignored for documents |
-| `dubbedAudioReady` | bool | audio and video jobs — true once the opt-in AI-dubbed track finishes generating (runs after `done`, non-blocking, only if `includeDubbing` was set) |
+| `includeDubbing` | bool | set from `include_dubbing` at upload time; audio jobs only, ignored for documents and video |
+| `dubbedAudioReady` | bool | audio jobs — true once the AI-dubbed track exists. Dubbing is a pipeline stage, so this is already true when `status = "done"`; when `includeDubbing` was false the stage is skipped entirely and this stays false |
+| `burnInStatus` | `idle` \| `rendering` \| `ready` \| `failed` | video jobs — state of the **on-demand** subtitle burn-in, which is independent of `status` and only starts when `POST /burn-in` is called |
+| `burnInError` | string \| null | set only when `burnInStatus = "failed"` |
 
 **status values** — the UI switches on these exactly:
 
 ```
-queued → extracting → transcribing → translating → done
+queued → extracting → transcribing → translating → [dubbing] → done
 any    → failed | cancelled
 ```
 
-Document jobs skip `transcribing`.
+Document jobs skip `transcribing`. `dubbing` only occurs for audio jobs
+uploaded with `include_dubbing=true`, and the job stays in it until the
+dubbed track exists — a job never reports `done` with dubbing still
+pending. Video jobs never enter `dubbing`; their extra output (the
+burned-in MP4) is requested separately via `POST /burn-in` and tracked by
+`burnInStatus`, not `status`.
 
 ### Segment
 
@@ -90,21 +99,21 @@ the backend should persist it, not compute it.
   "online": true,
   "offlineMode": true,
   "models": [
-    { "name": "faster-whisper small (mr)", "task": "asr", "loaded": true, "sizeMb": 484 }
+    { "name": "faster-whisper medium (audio)", "task": "asr", "loaded": true, "sizeMb": null }
   ],
   "queueLength": 1,
   "diskFreeGb": 41.6,
-  "ramTotalGb": 16,
-  "gpuAvailable": false,
-  "gpuEnabled": false
+  "ramTotalGb": null,
+  "cpuOnly": true
 }
 ```
 
-Polled every 20 s. Must be cheap — no model calls.
+Polled every 20 s. Must be cheap — no model calls. `loaded` reports
+whichever models the three pipelines have lazily loaded so far, so it is
+expected to be `false` for everything on a freshly-started server.
 
-`gpuAvailable` reflects whether a CUDA-capable GPU exists on this machine.
-`gpuEnabled` reflects the current app-wide device setting (see
-`POST /api/settings/device` below).
+`cpuOnly` is always true: this build has no GPU code path and no device
+switch.
 
 ### `GET /api/jobs`
 
@@ -166,19 +175,29 @@ Document jobs only. Streams the translated file (formatting preserved) with
 
 ### `GET /api/jobs/{id}/dubbed-audio`
 
-Audio and video jobs, only if the job opted in with `include_dubbing=true`.
-Streams the bonus AI-dubbed WAV track. `404` until `dubbedAudioReady = true`
-— this can lag behind `status = "done"` since dubbing runs in the background
-after the segments are ready.
+Audio jobs, only if the job opted in with `include_dubbing=true`. Streams
+the AI-dubbed WAV track. `404` until `dubbedAudioReady = true`. Dubbing is
+part of the job (the job does not reach `done` until it finishes), so
+`dubbedAudioReady` is true by the time `status = "done"`.
 
-### `POST /api/settings/device`
+### `POST /api/jobs/{id}/burn-in` → `Job`
 
-Body: `{ "useGpu": true }`. Switches ASR/translation/TTS between CPU and GPU
-**app-wide** — not per-job. Returns the same shape as `GET /api/status`.
-`400` (`gpu_unavailable`) if `useGpu` is true and `gpuAvailable` is false.
-Already-loaded models are dropped and reload on the new device the next time
-they're used, so the job immediately after a switch may be slightly slower
-while it reloads.
+Video jobs only. Starts an ffmpeg re-encode that burns the job's **current
+saved subtitles** into the video, and returns immediately — poll
+`burnInStatus` (`idle` → `rendering` → `ready` | `failed`) for progress.
+
+This is deliberately not part of the job pipeline: it is expensive and is
+meant to run *after* the transcript has been reviewed and corrected in the
+editor, so save segment edits (`PUT /segments`) before calling it. Calling
+it again re-renders with whatever is saved at that moment.
+
+`400` if the job is not a video (`not_a_video`) or has not finished
+(`not_ready`); `409` (`already_rendering`) if a render is in flight.
+
+### `GET /api/jobs/{id}/burned-in-video`
+
+Streams the burned-in MP4 as an attachment. `404` (`not_ready`) until
+`burnInStatus = "ready"`.
 
 ---
 

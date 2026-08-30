@@ -35,7 +35,12 @@ export function useJobs() {
     const tick = async () => {
       const next = await refresh()
       if (!mounted.current) return
-      const busy = (next ?? []).some((j) => !isTerminal(j.status))
+      // A burn-in render leaves the job itself "done", so poll on that
+      // too -- otherwise the render would appear frozen until the slow
+      // idle heartbeat came round.
+      const busy = (next ?? []).some(
+        (j) => !isTerminal(j.status) || j.burnInStatus === 'rendering'
+      )
       timer.current = setTimeout(tick, busy ? 1000 : 8000)
     }
     tick()

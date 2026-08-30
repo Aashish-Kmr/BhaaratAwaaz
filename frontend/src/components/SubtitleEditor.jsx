@@ -152,6 +152,22 @@ export default function SubtitleEditor({ job, onBack }) {
   const dubbedAudioUrl =
     (job.kind === 'audio' || job.kind === 'video') && job.dubbedAudioReady ? api.dubbedAudioUrl(job) : null
 
+  // Burn-in is a video-only, on-demand render: it re-encodes the whole
+  // file with ffmpeg, so it runs against the subtitles as saved right now
+  // rather than automatically on the raw transcript.
+  const canBurnIn = job.kind === 'video' && segments.length > 0
+  const burnInStatus = job.burnInStatus ?? 'idle'
+  const burnedInUrl = burnInStatus === 'ready' ? api.burnedInVideoUrl(job) : null
+
+  const startBurnIn = async () => {
+    setError(null)
+    try {
+      await api.startBurnIn(job.id)
+    } catch (err) {
+      setError(err.message || 'Could not start the burn-in render')
+    }
+  }
+
   const flagged = segments.filter((s) => segmentWarnings(s).length > 0).length
 
   return (
@@ -242,6 +258,52 @@ export default function SubtitleEditor({ job, onBack }) {
             <p className="mt-3 text-xs text-ink-400">
               Files download to this machine. Burn-in and re-mux happen on the backend.
             </p>
+
+            {canBurnIn && (
+              <div className="mt-4 border-t border-ink-700/70 pt-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">
+                  Burned-in video
+                </h3>
+
+                {burnedInUrl ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => window.open(burnedInUrl, '_blank')}
+                    >
+                      Download MP4
+                    </Button>
+                    <Button size="sm" onClick={startBurnIn} disabled={dirty}>
+                      Re-render
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={startBurnIn}
+                    disabled={burnInStatus === 'rendering' || dirty}
+                  >
+                    {burnInStatus === 'rendering'
+                      ? 'Rendering…'
+                      : 'Render burned-in video'}
+                  </Button>
+                )}
+
+                <p className="mt-2 text-xs text-ink-400">
+                  {dirty
+                    ? 'Save your edits first — the render uses the saved subtitles.'
+                    : 'Re-encodes the video with these subtitles burned in. Slow on CPU.'}
+                </p>
+
+                {burnInStatus === 'failed' && job.burnInError && (
+                  <p className="mt-2 rounded-md bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
+                    {job.burnInError}
+                  </p>
+                )}
+              </div>
+            )}
           </Card>
 
           <Card className="p-4">
