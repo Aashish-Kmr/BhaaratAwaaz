@@ -1,50 +1,36 @@
+"""
+Video job adapter.
+
+Thin bridge between the host job queue and the vendored BAIF-Video-main
+pipeline (backend/vendor/video_baif). Audio extraction, transcription,
+NLLB translation, SRT generation and subtitle burn-in all live there.
+
+The job itself stops at the SRT stage: burn-in is deliberately NOT part
+of the job. It is a separate, on-demand step (see render_burned_in
+below) so the expensive ffmpeg re-encode runs against the subtitles the
+user has actually reviewed and corrected, rather than the raw machine
+transcript.
+"""
+
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
-import av
-
-from app.core.asr import asr
-from app.jobs.models import Job
+from app.jobs.models import Job, Segment
 from app.jobs.store import JobStore
-from app.pipelines.common import maybe_dub, should_stop_fn, translate_segments
+from app.pipelines.common import should_stop_fn
 
+from vendor.video_baif.services.pipeline import process_video
+from vendor.video_baif.services.renderer import render_subtitled_video
+from vendor.video_baif.services.subtitles import create_srt
 
-class VideoProcessingError(Exception):
-    pass
-
-
-def _extract_audio(video_path: Path, output_dir: Path) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_audio_path = output_dir / f"{video_path.stem}.wav"
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
-        str(output_audio_path),
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise VideoProcessingError(f"ffmpeg audio extraction failed: {result.stderr}")
-
-    return output_audio_path
-
-
-def _video_duration(video_path: Path) -> float | None:
-    try:
-        with av.open(str(video_path)) as container:
-            if container.duration is not None:
-                return float(container.duration) / 1_000_000
-    except Exception:
-        pass
-    return None
+# The vendored pipeline takes full language names ("marathi"), not the
+# two-letter codes the rest of this app uses.
+LANGUAGE_NAMES = {
+    "mr": "marathi",
+    "hi": "hindi",
+    "en": "english",
+}
 
 
 def run(job: Job, store: JobStore) -> None:
@@ -52,44 +38,86 @@ def run(job: Job, store: JobStore) -> None:
 
     store.update(job.id, status="extracting", stage="Extracting audio", progress=0.05)
 
-    duration = _video_duration(job.input_file)
-    if duration:
-        store.update(job.id, duration_sec=duration)
+    def on_progress(fraction: float) -> None:
+        if fraction < 0.15:
+            status, stage = "extracting", "Extracting audio"
+        elif fraction < 0.55:
+            status, stage = "transcribing", "Transcribing"
+        else:
+            status, stage = "translating", "Translating"
 
-    audio_path = _extract_audio(job.input_file, job.job_path / "tmp")
+        store.update(job.id, status=status, stage=stage, progress=fraction)
 
-    if should_stop():
-        raise InterruptedError("cancelled")
-
-    store.update(job.id, status="transcribing", stage="Transcribing", progress=0.15)
-
-    def on_asr_progress(fraction: float) -> None:
-        store.update(job.id, progress=0.15 + fraction * 0.4)
-
-    asr_result = asr.transcribe(
-        audio_path,
-        language=job.source_lang,
-        duration_hint=duration,
-        on_progress=on_asr_progress,
+    result = process_video(
+        video_path=job.input_file,
+        job_id=job.id,
+        source_language=LANGUAGE_NAMES[job.source_lang],
+        target_language=LANGUAGE_NAMES[job.target_lang],
+        # Stop at SRT -- burn-in happens later, on demand.
+        output_format="srt",
+        on_progress=on_progress,
         should_stop=should_stop,
     )
 
-    if should_stop():
-        raise InterruptedError("cancelled")
+    source_segments = result["source_segments"]
+    translated_segments = result["translated_segments"]
 
-    store.update(job.id, status="translating", stage="Translating", progress=0.55)
-
-    segments = translate_segments(
-        job.id,
-        store,
-        asr_result["segments"],
-        job.source_lang,
-        job.target_lang,
-        should_stop,
-        progress_start=0.55,
-        progress_span=0.4,
-    )
+    segments = [
+        Segment(
+            id=f"{job.id}_s{index}",
+            start=source["start"],
+            end=source["end"],
+            source=source["text"],
+            target=translated["text"],
+        )
+        for index, (source, translated) in enumerate(
+            zip(source_segments, translated_segments)
+        )
+    ]
 
     store.save_segments(job.id, segments)
 
-    maybe_dub(job, store, segments, should_stop)
+    store.update(
+        job.id,
+        subtitle_srt_path=result["translated_srt"],
+        duration_sec=segments[-1].end if segments else None,
+    )
+
+
+def render_burned_in(job: Job, store: JobStore) -> Path:
+    """
+    Burn the job's current (possibly user-edited) subtitles into a copy
+    of the video. Called on demand from the API, not by the worker.
+
+    Re-generates the SRT from the saved segments first, so edits made in
+    the subtitle editor are what actually get burned in.
+    """
+
+    segments = store.load_segments(job.id)
+
+    if not segments:
+        raise ValueError("This job has no subtitles to burn in.")
+
+    srt_path = job.job_path / "burned_in.srt"
+
+    create_srt(
+        [
+            {
+                "start": segment["start"],
+                "end": segment["end"],
+                "text": segment.get("target") or segment.get("source") or "",
+            }
+            for segment in segments
+        ],
+        srt_path,
+    )
+
+    output_path = job.burned_in_video_file
+
+    render_subtitled_video(
+        job.input_file,
+        srt_path,
+        output_path,
+    )
+
+    return output_path

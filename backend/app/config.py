@@ -5,6 +5,33 @@ import sys
 from pathlib import Path
 
 
+def _force_utf8_console() -> None:
+    """
+    Make stdout/stderr tolerate Devanagari.
+
+    The vendored pipelines log transcript and translation text with plain
+    print() (see vendor/video_baif/services/transcriber.py, which prints
+    every segment). On Windows the console defaults to a legacy code page
+    -- cp1252 here -- and printing Hindi/Marathi raises
+    UnicodeEncodeError: 'charmap' codec can't encode characters, which
+    surfaces as a failed job rather than as a logging problem.
+
+    Reconfiguring to UTF-8 with errors="replace" keeps that logging from
+    ever being able to kill a job. Guarded because a frozen/windowed
+    build can have stdout detached entirely (None), and because
+    reconfigure() only exists on real text streams.
+    """
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+_force_utf8_console()
+
+
 def _app_root() -> Path:
     """
     Root directory bundled resources (frontend/dist, fonts, the pre-
@@ -92,18 +119,6 @@ for directory in (DATA_DIR, JOBS_DIR, MODELS_DIR, TRANSLATION_MODEL_DIR, HF_CACH
 
 SUPPORTED_LANGUAGES = {"en", "hi", "mr"}
 
-FLORES_CODES = {
-    "en": "eng_Latn",
-    "hi": "hin_Deva",
-    "mr": "mar_Deva",
-}
-
-LANGUAGE_LABELS = {
-    "en": "English",
-    "hi": "Hindi",
-    "mr": "Marathi",
-}
-
 # ----------------------------------------------------------------------
 # File kinds
 # ----------------------------------------------------------------------
@@ -130,34 +145,23 @@ def kind_of(filename: str) -> str | None:
 
 
 # ----------------------------------------------------------------------
-# Model settings (overridable via env for packaging / low-resource boxes)
+# Model settings
 # ----------------------------------------------------------------------
-
-ASR_MODEL = os.getenv("BAIF_ASR_MODEL", "medium")
-ASR_DEVICE = os.getenv("BAIF_ASR_DEVICE", "cpu")
-ASR_COMPUTE_TYPE = os.getenv("BAIF_ASR_COMPUTE_TYPE", "int8")
-ASR_BEAM_SIZE = int(os.getenv("BAIF_ASR_BEAM_SIZE", "5"))
-# 0 = let ctranslate2 pick (its own default was as good as or better than
-# forcing all cores when benchmarked on Apple Silicon -- more threads isn't
-# automatically faster, especially on P+E core CPUs). Worth experimenting
-# with on whatever machine actually runs the demo.
-ASR_CPU_THREADS = int(os.getenv("BAIF_ASR_CPU_THREADS", "0"))
-
-TRANSLATION_DEVICE = os.getenv("BAIF_TRANSLATION_DEVICE", "cpu")
-# How many segments/paragraphs go into one model.generate() call. Higher is
-# faster (fewer calls, better CPU utilization) but uses more memory per call.
-TRANSLATION_BATCH_SIZE = int(os.getenv("BAIF_TRANSLATION_BATCH_SIZE", "8"))
-# Beam search width for translation. Lower is faster with a small quality
-# tradeoff -- try 1 (greedy) or 3 if translation is the bottleneck.
-TRANSLATION_NUM_BEAMS = int(os.getenv("BAIF_TRANSLATION_NUM_BEAMS", "5"))
-# unset = leave torch's own default thread count alone (same reasoning as
-# ASR_CPU_THREADS above -- benchmarked no better, sometimes worse, on this
-# machine when forced to all cores).
-TORCH_NUM_THREADS = int(os.environ["BAIF_TORCH_THREADS"]) if os.getenv("BAIF_TORCH_THREADS") else None
-TTS_DEVICE = os.getenv("BAIF_TTS_DEVICE", "cpu")
-
-VAD_ENABLED = True
-VAD_MIN_SILENCE_MS = 500
+#
+# There are deliberately none here. Each pipeline is a vendored upstream
+# project that owns its own model choices and tuning, and they do not
+# agree with each other -- the audio pipeline uses faster-whisper medium
+# and IndicTrans2, the video pipeline uses faster-whisper small and
+# NLLB-200, the document pipeline uses IndicTrans2 with its own pivot
+# routing. Centralising those here would mean overriding upstream
+# behaviour behind their backs. To change one, edit that project's own
+# config:
+#
+#   documents  vendor/docs_baif/config.py
+#   audio      vendor/audio_ba/shared/config.py
+#   video      vendor/video_baif/config.py
+#
+# All three are pinned to CPU; this build ships no CUDA support.
 
 MEDIA_HOST = os.getenv("BAIF_HOST", "127.0.0.1")
 MEDIA_PORT = int(os.getenv("BAIF_PORT", "8000"))

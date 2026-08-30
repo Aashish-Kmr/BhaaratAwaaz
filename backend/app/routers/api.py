@@ -8,16 +8,13 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
 from app import config
-from app.core import device
-from app.core.asr import asr
-from app.core.translation import translator
-from app.core.tts import tts
 from app.errors import api_error
 from app.jobs import job_store as store
 from app.jobs import worker
 from app.jobs.models import Job, Segment, now_iso
 from app.jobs.store import JobNotFound
 from app.pipelines.document import MEDIA_TYPES as DOCUMENT_MEDIA_TYPES
+from app.status import model_status
 
 router = APIRouter(prefix="/api")
 
@@ -28,27 +25,6 @@ def health():
 
 
 def _status_dict() -> dict:
-    models = [
-        {
-            "name": f"faster-whisper {config.ASR_MODEL}",
-            "task": "asr",
-            "loaded": asr.is_ready(),
-            "sizeMb": None,
-        },
-        {
-            "name": "IndicTrans2",
-            "task": "translation",
-            "loaded": translator.is_ready(),
-            "sizeMb": None,
-        },
-        {
-            "name": "Indic Parler-TTS",
-            "task": "tts",
-            "loaded": tts.is_ready(),
-            "sizeMb": None,
-        },
-    ]
-
     disk_free_gb = round(shutil.disk_usage(config.DATA_DIR).free / (1024**3), 1)
 
     queue_length = sum(
@@ -58,29 +34,18 @@ def _status_dict() -> dict:
     return {
         "online": True,
         "offlineMode": True,
-        "models": models,
+        "models": model_status(),
         "queueLength": queue_length,
         "diskFreeGb": disk_free_gb,
         "ramTotalGb": None,
-        "gpuAvailable": device.gpu_available(),
-        "gpuEnabled": config.ASR_DEVICE == "cuda",
+        # This build runs entirely on CPU -- the vendored pipelines pin
+        # themselves to it and there is no device switch to expose.
+        "cpuOnly": True,
     }
 
 
 @router.get("/status")
 def get_status():
-    return _status_dict()
-
-
-@router.post("/settings/device")
-def set_device(body: dict):
-    use_gpu = bool(body.get("useGpu"))
-
-    if use_gpu and not device.gpu_available():
-        raise api_error(400, "No CUDA-capable GPU is available on this machine.", "gpu_unavailable")
-
-    device.set_device("cuda" if use_gpu else "cpu")
-
     return _status_dict()
 
 
@@ -268,6 +233,51 @@ def download_result(job_id: str):
         media_type=media_type,
         filename=output_file.name,
         headers={"Content-Disposition": f'attachment; filename="{output_file.name}"'},
+    )
+
+
+@router.post("/jobs/{job_id}/burn-in")
+def start_burn_in(job_id: str):
+    """
+    Render the job's current subtitles into the video.
+
+    Deliberately separate from the job pipeline: this re-encodes the whole
+    video with ffmpeg, so it runs only when asked for, against whatever
+    subtitles are saved at that moment (i.e. after the user has reviewed
+    and corrected them in the editor).
+    """
+
+    job = _get_job_or_404(job_id)
+
+    if job.kind != "video":
+        raise api_error(400, "Only video jobs can be burned in.", "not_a_video")
+
+    if job.status != "done":
+        raise api_error(400, "The job must finish before burning in subtitles.", "not_ready")
+
+    if job.burn_in_status == "rendering":
+        raise api_error(409, "A burn-in render is already running.", "already_rendering")
+
+    store.update(job_id, burn_in_status="rendering", burn_in_error=None)
+    worker.enqueue_burn_in(job_id)
+
+    return store.get(job_id).to_public_dict()
+
+
+@router.get("/jobs/{job_id}/burned-in-video")
+def download_burned_in_video(job_id: str):
+    job = _get_job_or_404(job_id)
+
+    if job.burn_in_status != "ready" or not job.burned_in_video_file.exists():
+        raise api_error(404, "Burned-in video not ready yet.", "not_ready")
+
+    filename = f"subtitled_{Path(job.filename).stem}.mp4"
+
+    return FileResponse(
+        path=job.burned_in_video_file,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -25,7 +25,10 @@ class Worker:
 
     def __init__(self, store: JobStore):
         self.store = store
-        self._queue: "queue.Queue[str]" = queue.Queue()
+        # (kind, job_id) -- "job" runs a pipeline, "burn_in" runs the
+        # on-demand subtitle render. Both go through the same single
+        # queue so a render never competes with a job for the CPU.
+        self._queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -33,15 +36,42 @@ class Worker:
         self._thread.start()
 
     def enqueue(self, job_id: str) -> None:
-        self._queue.put(job_id)
+        self._queue.put(("job", job_id))
+
+    def enqueue_burn_in(self, job_id: str) -> None:
+        self._queue.put(("burn_in", job_id))
 
     def _loop(self) -> None:
         while True:
-            job_id = self._queue.get()
+            kind, job_id = self._queue.get()
             try:
-                self._process(job_id)
+                if kind == "burn_in":
+                    self._process_burn_in(job_id)
+                else:
+                    self._process(job_id)
             except Exception:
                 traceback.print_exc()
+
+    def _process_burn_in(self, job_id: str) -> None:
+        try:
+            job = self.store.get(job_id)
+        except JobNotFound:
+            return
+
+        try:
+            video_pipeline.render_burned_in(job, self.store)
+        except JobNotFound:
+            return
+        except Exception as exc:
+            traceback.print_exc()
+            self.store.update(
+                job_id,
+                burn_in_status="failed",
+                burn_in_error=str(exc),
+            )
+            return
+
+        self.store.update(job_id, burn_in_status="ready", burn_in_error=None)
 
     def _process(self, job_id: str) -> None:
         try:

@@ -1,22 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { api, USING_MOCK } from './api/index.js'
 import { useJobs } from './hooks/useJobs.js'
 import UploadPanel from './components/UploadPanel.jsx'
 import JobQueue from './components/JobQueue.jsx'
 import SubtitleEditor from './components/SubtitleEditor.jsx'
-import { Badge, Card, Checkbox } from './components/ui.jsx'
+import { Badge, Card } from './components/ui.jsx'
 
 export default function App() {
   const { jobs, loading, error, createJob, cancelJob, retryJob, deleteJob } = useJobs()
   const [openJobId, setOpenJobId] = useState(null)
   const [status, setStatus] = useState(null)
-
-  const refreshStatus = useCallback(() => {
-    return api
-      .getStatus()
-      .then((s) => setStatus(s))
-      .catch(() => setStatus({ online: false }))
-  }, [])
 
   useEffect(() => {
     let alive = true
@@ -71,7 +64,7 @@ export default function App() {
               onRetry={retryJob}
               onDelete={deleteJob}
             />
-            <MachineStrip status={status} onRefresh={refreshStatus} />
+            <MachineStrip status={status} />
           </div>
         )}
       </main>
@@ -79,20 +72,8 @@ export default function App() {
   )
 }
 
-function MachineStrip({ status, onRefresh }) {
-  const [switching, setSwitching] = useState(false)
-
+function MachineStrip({ status }) {
   if (!status || status.online === false) return null
-
-  const toggleGpu = async (e) => {
-    setSwitching(true)
-    try {
-      await api.setDevice(e.target.checked)
-      await onRefresh()
-    } finally {
-      setSwitching(false)
-    }
-  }
 
   return (
     <Card className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-xs text-ink-400">
@@ -104,19 +85,8 @@ function MachineStrip({ status, onRefresh }) {
         </span>
       ))}
       {status.queueLength != null && <span>Queue: {status.queueLength}</span>}
-      {status.ramTotalGb && <span>RAM: {status.ramTotalGb} GB</span>}
       {status.diskFreeGb && <span>Disk free: {status.diskFreeGb} GB</span>}
-      <Checkbox
-        label={switching ? 'Switching…' : 'Process on GPU'}
-        hint={
-          !status.gpuAvailable
-            ? '(no GPU detected)'
-            : '(transcription + translation only — dubbing always runs on CPU)'
-        }
-        checked={!!status.gpuEnabled}
-        onChange={toggleGpu}
-        disabled={!status.gpuAvailable || switching}
-      />
+      {status.cpuOnly && <span>CPU only</span>}
     </Card>
   )
 }

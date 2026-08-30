@@ -130,9 +130,18 @@ export const httpApi = {
     return `${BASE}/jobs/${encodeURIComponent(job.id)}/dubbed-audio`
   },
 
-  /** App-wide: switch ASR/translation/TTS between CPU and GPU. */
-  async setDevice(useGpu) {
-    return request('/settings/device', { method: 'POST', body: { useGpu } })
+  /**
+   * Video jobs: kick off the subtitle burn-in render. Runs against the
+   * subtitles saved right now, so save edits first. Poll the job's
+   * burnInStatus for progress.
+   */
+  async startBurnIn(id) {
+    return request(`/jobs/${encodeURIComponent(id)}/burn-in`, { method: 'POST' })
+  },
+
+  /** Video jobs: the burned-in MP4, once burnInStatus is "ready". */
+  burnedInVideoUrl(job) {
+    return `${BASE}/jobs/${encodeURIComponent(job.id)}/burned-in-video`
   },
 }
 

@@ -3,17 +3,32 @@
 One app for translating video, audio, and documents between English, Hindi,
 and Marathi (any pair), running entirely on one machine.
 
-- `backend/` — FastAPI app: document translation (IndicTrans2), audio
-  ASR→translate→dub (faster-whisper + IndicTrans2 + Parler-TTS), video
-  extract→transcribe→translate (ffmpeg + faster-whisper + IndicTrans2), a
-  single-worker job queue, and the REST API the frontend talks to.
+- `backend/` — FastAPI app: a single-worker job queue, the REST API the
+  frontend talks to, and thin adapters that drive the three original
+  pipelines. It contains no translation/ASR/TTS logic of its own.
+- `backend/vendor/` — the three original projects, vendored so they can
+  run in one process. Each keeps its own models, tuning and logic; only
+  their `import` lines were rewritten (their top-level module names —
+  `config`, `api`, `app`, `services`, `utils` — collided with each
+  other), their directories were pointed at `backend/data`, and small
+  optional progress/cancellation hooks were added:
+  - `vendor/docs_baif/` ← `BAIF-main` — documents (IndicTrans2, pivots
+    hi↔mr through English)
+  - `vendor/audio_ba/` ← `BhaaratAwaaz-main` — audio (faster-whisper
+    **medium** + IndicTrans2 + Parler-TTS dubbing)
+  - `vendor/video_baif/` ← `BAIF-Video-main` — video (faster-whisper
+    **medium** + **NLLB-200** + ffmpeg subtitle burn-in)
 - `frontend/` — React/Vite UI: upload, job queue, subtitle/segment editor.
   Built to static files and served by the backend on the same port — no
   Node.js needed at runtime, only at build time.
 - `fonts/` — Devanagari font used by the PDF translation handler.
 - `BAIF-main/`, `BhaaratAwaaz-main/`, `BAIF-Video-main/` — the original
-  standalone projects this app was consolidated from. Left in place as
-  reference; not used at runtime.
+  standalone projects, kept as the upstream reference. The runtime uses
+  the vendored copies under `backend/vendor/`, not these.
+
+Everything runs on **CPU only** — there is no GPU code path and no device
+toggle. The three pipelines each pin themselves to CPU, which was already
+their upstream default.
 
 See `PACKAGING.md` for turning this into a distributable executable.
 
@@ -102,50 +117,48 @@ primary packaging path.
   (enable "Include dubbing" at upload time) once it finishes generating in
   the background.
 - Video: `.mp4`, `.mkv`, `.mov`, `.avi`, `.webm` — transcript + translated
-  segments, exportable as SRT/VTT/plain text from the editor, plus the same
-  opt-in AI-dubbed audio track as audio jobs (a separate downloadable track,
-  not a re-muxed dubbed video).
+  segments, exportable as SRT/VTT/plain text from the editor, plus an
+  on-demand **burned-in subtitle MP4** (rendered from the editor after you
+  have reviewed the subtitles, so corrections make it into the video).
+  Video jobs do not produce a dubbed track; dubbing is audio-only.
 
-## GPU acceleration
+## CPU only
 
-ASR, translation and TTS default to CPU. If the machine has a CUDA-capable
-GPU and a matching CUDA build of `torch`/`ctranslate2` installed, toggle
-"Process on GPU" in the UI (or `POST /api/settings/device`) to switch all
-three over. This is an app-wide setting, not per-job — flipping it drops any
-already-loaded models so they reload on the new device next time they're
-used, which briefly slows down whichever job runs right after a switch.
+There is no GPU code path, no device toggle, and no CUDA build. Each
+vendored pipeline pins itself to CPU, which was already its upstream
+default.
 
-On a low-VRAM GPU, running all three models on GPU at once can be tight —
-watch `nvidia-smi` during a job if you hit instability, and consider a
-smaller `BAIF_ASR_MODEL` (e.g. `small`) to leave more headroom.
+Note that a GPU would not make transcription *more accurate* — the same
+model with the same decoding settings produces the same text either way.
+A GPU is faster, which is only indirectly an accuracy story: it makes a
+larger model affordable.
 
 ## Tuning speed vs. quality
 
-Audio and video transcripts run through the same ASR and translation code,
-so these apply equally to both. All are env vars, unset = the defaults
-below:
+There are no app-level tuning env vars: each pipeline is a vendored
+upstream project that owns its own model choices and decoding settings,
+and they deliberately differ. Change them in the pipeline you actually
+mean:
 
-| var | default | effect of lowering it |
+| pipeline | file | notable settings |
 |---|---|---|
-| `BAIF_ASR_MODEL` | `medium` | smaller Whisper model (`small`, `base`, `tiny`) — much faster transcription, somewhat less accurate |
-| `BAIF_ASR_BEAM_SIZE` | `5` | faster transcription per segment |
-| `BAIF_TRANSLATION_NUM_BEAMS` | `5` | faster translation generation per batch |
-| `BAIF_TRANSLATION_BATCH_SIZE` | `8` | segments translated per model call — raising it (not lowering) trades memory for fewer, more efficient calls |
-| `BAIF_ASR_CPU_THREADS` | `0` (library auto) | CPU threads faster-whisper uses per transcription |
-| `BAIF_TORCH_THREADS` | unset (library auto) | CPU threads PyTorch uses for translation |
+| documents | `vendor/docs_baif/config.py`, `translator.py` | IndicTrans2 model paths, `max_new_tokens` |
+| audio | `vendor/audio_ba/shared/config.py` | `ASR_MODEL` (medium), `ASR_BEAM_SIZE`, VAD |
+| video | `vendor/video_baif/services/transcriber.py` | `MODEL_SIZE` (medium), beam size, VAD, batch size |
 
-Translation segments are already batched (multiple segments per
-`model.generate()` call, not one call each) — this alone is roughly a 3-4x
-speedup over translating one segment at a time on a typical transcript.
+**Whisper model size is the main quality lever.** Measured on this
+machine (8 cores, CPU) against a 60 s Marathi clip using the video
+pipeline's settings:
 
-**On multi-core CPUs, more threads is not automatically faster.** Benchmarked
-on a 10-core Apple Silicon Mac, forcing `BAIF_ASR_CPU_THREADS=10` or
-`BAIF_TORCH_THREADS=10` was the same or slightly *slower* than leaving both
-on their library defaults (which land around 4 threads on their own) —
-Apple's performance/efficiency core split means naively maxing thread count
-can hurt. Whether this holds on a different machine (e.g. a uniform-core
-Windows/Linux laptop) isn't something to assume either way — benchmark on
-the actual demo machine before changing these from their defaults.
+| model | 60 s of audio | speed |
+|---|---|---|
+| `small` | 34.7 s | 1.73× realtime |
+| `medium` | 89.3 s | 0.67× realtime |
+
+So `medium` is ~2.6× slower but noticeably better on Indic audio — which
+is why both pipelines now use it. Dropping video back to `small` roughly
+triples throughput at a real accuracy cost, and would require adding
+`small` back to `scripts/download_models.py`.
 
 ## Known limitations
 

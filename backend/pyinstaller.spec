@@ -48,6 +48,11 @@ for pkg in (
     "parler_tts",
     "soundfile",
     "librosa",
+    # Vendored document pipeline auto-detects the source language with
+    # langdetect, which ships its profile data as package data files.
+    "langdetect",
+    # Vendored video pipeline writes SRT via pysrt.
+    "pysrt",
 ):
     try:
         d, b, h = collect_all(pkg)
@@ -62,6 +67,11 @@ for pkg in (
 datas += [
     ("../frontend/dist", "frontend/dist"),
     ("../fonts", "fonts"),
+    # The vendored document pipeline resolves its Devanagari font
+    # relative to its own package directory (see
+    # vendor/docs_baif/handlers/pdf_handler.py), so it needs its own copy
+    # alongside the shared one above.
+    ("vendor/docs_baif/fonts", "vendor/docs_baif/fonts"),
 ]
 
 # Bundle whatever's already been downloaded into ./data (IndicTrans2 under

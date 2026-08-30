@@ -60,6 +60,14 @@ class Job:
     include_dubbing: bool = False
     dubbed_audio_ready: bool = False
 
+    # Video only. Burn-in is not part of the job: it runs on demand after
+    # the user has reviewed/edited the subtitles, so it carries its own
+    # small state machine independent of `status`.
+    #   idle -> rendering -> ready | failed
+    subtitle_srt_path: str | None = None
+    burn_in_status: str = "idle"
+    burn_in_error: str | None = None
+
     # Internal, not exposed in the public API shape.
     input_path: str = ""
     job_dir: str = ""
@@ -84,6 +92,8 @@ class Job:
             "segmentCount": self.segment_count,
             "includeDubbing": self.include_dubbing,
             "dubbedAudioReady": self.dubbed_audio_ready,
+            "burnInStatus": self.burn_in_status,
+            "burnInError": self.burn_in_error,
         }
 
     @property
@@ -108,3 +118,8 @@ class Job:
     @property
     def dubbed_audio_file(self) -> Path:
         return self.job_path / "dubbed.wav"
+
+    @property
+    def burned_in_video_file(self) -> Path:
+        """Video jobs: the subtitle burn-in render, once requested."""
+        return self.job_path / "burned_in.mp4"
