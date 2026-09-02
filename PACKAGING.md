@@ -12,6 +12,14 @@ built executable at all — steps 1, 2, and 4 below get you a working app via
 `python run.py` (step 5). Treat step 3 (the actual PyInstaller build) as
 optional polish once the app itself is working.
 
+**Handing the project to another machine instead of a binary**: see
+`packaging/offline/README.md`. One `build-bundle.ps1` run stages a ~11 GB
+folder — source, models, a pip wheelhouse, a prebuilt UI, ffmpeg and a Python
+installer — that sets up on a second Windows box with two commands and no
+internet: no PyPI, no Hugging Face login, no `download_models.py`, no Node.js,
+no `git`. Use that when the recipient should have the actual project rather
+than a frozen `.exe`.
+
 ## 1. Build the frontend
 
 ```bash

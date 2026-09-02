@@ -30,7 +30,9 @@ Everything runs on **CPU only** — there is no GPU code path and no device
 toggle. The three pipelines each pin themselves to CPU, which was already
 their upstream default.
 
-See `PACKAGING.md` for turning this into a distributable executable.
+See `PACKAGING.md` for turning this into a distributable executable, or
+`packaging/offline/README.md` for shipping the project itself — models,
+dependencies and all — to another Windows machine that has no internet.
 
 ## Run in development
 
